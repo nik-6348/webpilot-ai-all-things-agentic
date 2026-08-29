@@ -1,1 +1,23 @@
-{"name":"@webpilot/notifier","version":"0.1.0","private":true,"type":"module","scripts":{"dev":"tsx watch src/main.ts","build":"tsc -p tsconfig.json","start":"node dist/main.js","typecheck":"tsc -p tsconfig.json --noEmit","test":"node --test","lint":"tsc -p tsconfig.json --noEmit"},"dependencies":{"@webpilot/database":"workspace:*","@webpilot/gcp":"workspace:*","fastify":"5.6.0","googleapis":"160.0.0"},"devDependencies":{"tsx":"4.20.5"}}
+{
+  "name": "@webpilot/notifier",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/main.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/main.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node --test",
+    "lint": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@webpilot/database": "workspace:*",
+    "@webpilot/gcp": "workspace:*",
+    "fastify": "5.6.0",
+    "googleapis": "160.0.0"
+  },
+  "devDependencies": {
+    "tsx": "4.20.5"
+  }
+}

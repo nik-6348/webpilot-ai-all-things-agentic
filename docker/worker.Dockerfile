@@ -1,5 +1,6 @@
 FROM mcr.microsoft.com/playwright:v1.55.0-noble
 WORKDIR /app
+ENV CI=true
 RUN corepack enable
 COPY . .
 RUN pnpm install --no-frozen-lockfile && pnpm db:generate && pnpm turbo build --filter=@webpilot/browser-worker...

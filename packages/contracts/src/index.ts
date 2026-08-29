@@ -16,12 +16,30 @@ export const ExtractionFieldSchema = z.object({
   locator: LocatorSchema.optional(),
   attribute: z.string().optional(),
 });
-export const ExtractionSchemaSchema = z.object({ recordLocator: LocatorSchema.optional(), fields: z.array(ExtractionFieldSchema).min(1) });
+export const ExtractionSchemaSchema = z.object({
+  recordLocator: LocatorSchema.optional(),
+  fields: z.array(ExtractionFieldSchema).min(1),
+});
 export type ExtractionSchema = z.infer<typeof ExtractionSchemaSchema>;
 
 export const WorkflowStepSchema = z.object({
   id: z.string().min(1),
-  type: z.enum(["NAVIGATE", "CLICK", "TYPE", "SELECT", "CHECK", "UNCHECK", "SCROLL", "WAIT_FOR", "EXTRACT", "DOWNLOAD", "UPLOAD", "ASSERT", "SCREENSHOT", "DONE"]),
+  type: z.enum([
+    "NAVIGATE",
+    "CLICK",
+    "TYPE",
+    "SELECT",
+    "CHECK",
+    "UNCHECK",
+    "SCROLL",
+    "WAIT_FOR",
+    "EXTRACT",
+    "DOWNLOAD",
+    "UPLOAD",
+    "ASSERT",
+    "SCREENSHOT",
+    "DONE",
+  ]),
   description: z.string().min(1),
   locator: LocatorSchema.optional(),
   value: z.string().optional(),
@@ -72,13 +90,37 @@ export const VerificationSchema = z.object({
 export type Verification = z.infer<typeof VerificationSchema>;
 
 export const RunStatus = z.enum([
-  "CREATED", "PLANNING", "WAITING_PLAN_APPROVAL", "QUEUED", "RUNNING_DISCOVERY", "RUNNING_FAST_PATH",
-  "VALIDATING", "RECOVERING", "VERIFYING_RECOVERY", "WAITING_RECOVERY_APPROVAL", "WAITING_HIGH_RISK_APPROVAL",
-  "WAITING_HUMAN_VERIFICATION", "COMPLETED", "FAILED", "CANCELLED", "REJECTED"
+  "CREATED",
+  "PLANNING",
+  "WAITING_PLAN_APPROVAL",
+  "QUEUED",
+  "RUNNING_DISCOVERY",
+  "RUNNING_FAST_PATH",
+  "VALIDATING",
+  "RECOVERING",
+  "VERIFYING_RECOVERY",
+  "WAITING_RECOVERY_APPROVAL",
+  "WAITING_HIGH_RISK_APPROVAL",
+  "WAITING_HUMAN_VERIFICATION",
+  "COMPLETED",
+  "FAILED",
+  "CANCELLED",
+  "REJECTED",
 ]);
 export type RunStatus = z.infer<typeof RunStatus>;
 
-export const RunTrigger = z.enum(["MANUAL", "SCHEDULE", "SLACK", "EMAIL", "API"]);
+export const RunTrigger = z.enum([
+  "MANUAL",
+  "SCHEDULE",
+  "SLACK",
+  "EMAIL",
+  "API",
+]);
 export type RunTrigger = z.infer<typeof RunTrigger>;
 
-export type RunEventInput = { type: string; message: string; source: string; metadata?: Record<string, unknown> };
+export type RunEventInput = {
+  type: string;
+  message: string;
+  source: string;
+  metadata?: Record<string, unknown>;
+};

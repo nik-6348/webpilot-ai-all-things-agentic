@@ -1,2 +1,54 @@
-"use client";import {useEffect,useState} from "react";import Link from "next/link";import {api,workspace} from "../../../lib/api";
-export default function Runs(){const[r,setR]=useState<any[]>([]);useEffect(()=>{workspace().then(w=>w&&api(`/api/v1/runs?workspaceId=${w.id}`)).then(x=>x&&setR(x))},[]);return <><div className="pageHead"><div><div className="kicker">Execution history</div><h1>Runs</h1></div></div><div className="card"><table className="table"><thead><tr><th>Agent</th><th>Status</th><th>Mode</th><th>Gemini calls</th><th>Started</th></tr></thead><tbody>{r.map(x=><tr key={x.id}><td><Link href={`/app/runs/${x.id}`}>{x.agent.name}</Link></td><td><span className={`badge ${x.status==="COMPLETED"?"good":x.status.includes("WAITING")?"warn":""}`}>{x.status}</span></td><td>{x.executionMode}</td><td>{x.modelCallCount}</td><td>{new Date(x.createdAt).toLocaleString()}</td></tr>)}</tbody></table></div></>}
+"use client";
+import { useEffect, useState } from "react";
+import Link from "next/link";
+import { api, workspace } from "../../../lib/api";
+export default function Runs() {
+  const [r, setR] = useState<any[]>([]);
+  useEffect(() => {
+    workspace()
+      .then((w) => w && api(`/api/v1/runs?workspaceId=${w.id}`))
+      .then((x) => x && setR(x));
+  }, []);
+  return (
+    <>
+      <div className="pageHead">
+        <div>
+          <div className="kicker">Execution history</div>
+          <h1>Runs</h1>
+        </div>
+      </div>
+      <div className="card">
+        <table className="table">
+          <thead>
+            <tr>
+              <th>Agent</th>
+              <th>Status</th>
+              <th>Mode</th>
+              <th>Gemini calls</th>
+              <th>Started</th>
+            </tr>
+          </thead>
+          <tbody>
+            {r.map((x) => (
+              <tr key={x.id}>
+                <td>
+                  <Link href={`/app/runs/${x.id}`}>{x.agent.name}</Link>
+                </td>
+                <td>
+                  <span
+                    className={`badge ${x.status === "COMPLETED" ? "good" : x.status.includes("WAITING") ? "warn" : ""}`}
+                  >
+                    {x.status}
+                  </span>
+                </td>
+                <td>{x.executionMode}</td>
+                <td>{x.modelCallCount}</td>
+                <td>{new Date(x.createdAt).toLocaleString()}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </>
+  );
+}

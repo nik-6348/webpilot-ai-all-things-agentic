@@ -1,55 +1,719 @@
 import { chromium, type Page } from "playwright";
-import { prisma } from "@webpilot/database";
+import { prisma, type Prisma } from "@webpilot/database";
 import { ArtifactStore, EventBus, SecretVault } from "@webpilot/gcp";
-import { WorkflowSpecSchema, type WorkflowSpec, type WorkflowStep } from "@webpilot/contracts";
-import { navigateDiscovery, recoverWorkflow, verifyRecovery } from "@webpilot/agents";
-import { applyPatch, classifyRisk, compileAuditArtifact, nextVersionLabel } from "@webpilot/workflow-engine";
+import {
+  WorkflowSpecSchema,
+  type WorkflowSpec,
+  type WorkflowStep,
+} from "@webpilot/contracts";
+import {
+  navigateDiscovery,
+  recoverWorkflow,
+  verifyRecovery,
+} from "@webpilot/agents";
+import {
+  applyPatch,
+  classifyRisk,
+  compileAuditArtifact,
+  nextVersionLabel,
+} from "@webpilot/workflow-engine";
 import { assertSafeUrl } from "@webpilot/security";
-import { compactDom, detectChallenge, executeStep, installNetworkGuard } from "./browser.js";
+import {
+  compactDom,
+  detectChallenge,
+  executeStep,
+  installNetworkGuard,
+} from "./browser.js";
 
-const artifacts=new ArtifactStore(); const events=new EventBus(); const secrets=new SecretVault();
-async function event(runId:string,type:string,message:string,metadata?:unknown){await prisma.runEvent.create({data:{runId,eventType:type,source:"browser-worker",message,metadata:metadata as any}});await events.publish(process.env.PUBSUB_TOPIC||"webpilot-events",{runId,type,message,metadata}).catch(()=>{});}
-async function modelCall<T>(runId:string,agentType:string,fn:()=>Promise<T>){const t=Date.now();try{const out=await fn();await prisma.modelInvocation.create({data:{runId,agentType,model:process.env.GEMINI_MODEL||"gemini-3.7-flash",latencyMs:Date.now()-t,success:true}});await prisma.run.update({where:{id:runId},data:{modelCallCount:{increment:1}}});return out;}catch(e){await prisma.modelInvocation.create({data:{runId,agentType,model:process.env.GEMINI_MODEL||"gemini-3.7-flash",latencyMs:Date.now()-t,success:false}});throw e;}}
-async function loadCredentials(agent:any){if(!agent.connectionId)return{};const c=await prisma.connection.findUnique({where:{id:agent.connectionId}});if(!c||c.workspaceId!==agent.workspaceId)throw new Error("Invalid portal connection");await assertSafeUrl(agent.targetUrl,c.allowedDomains as string[]);const raw=await secrets.get(c.secretManagerRef);return JSON.parse(raw);}
-async function checkpoint(runId:string,step:WorkflowStep,index:number,status="COMPLETED",metadata?:unknown){await prisma.run.update({where:{id:runId},data:{currentStep:step.id}});await prisma.runStep.upsert({where:{runId_workflowStepId_sequenceNumber:{runId,workflowStepId:step.id,sequenceNumber:index}},update:{status,metadata:metadata as any},create:{runId,workflowStepId:step.id,sequenceNumber:index,actionType:step.type,status,metadata:metadata as any}});}
-async function requiresApproval(runId:string,step:WorkflowStep){if(classifyRisk(step)!=="HIGH")return false;const existing=await prisma.approval.findFirst({where:{runId,type:"HIGH_RISK_ACTION",status:"APPROVED",payload:{path:["stepId"],equals:step.id} as any}}).catch(()=>null);if(existing)return false;const run=await prisma.run.findUniqueOrThrow({where:{id:runId}});await prisma.approval.create({data:{workspaceId:run.workspaceId,runId,type:"HIGH_RISK_ACTION",riskLevel:"HIGH",reason:step.description,payload:{stepId:step.id,step} as any}});await prisma.run.update({where:{id:runId},data:{status:"WAITING_HIGH_RISK_APPROVAL",leaseOwner:null,leaseExpiresAt:null}});await event(runId,"APPROVAL_REQUIRED",`High-risk action requires approval: ${step.description}`,{stepId:step.id});return true;}
-async function challengePause(runId:string,page:Page){const shot=await page.screenshot({type:"jpeg",quality:70});const ref=await artifacts.put(`runs/${runId}/challenge.jpg`,shot,"image/jpeg");const run=await prisma.run.findUniqueOrThrow({where:{id:runId}});await prisma.approval.create({data:{workspaceId:run.workspaceId,runId,type:"HUMAN_VERIFICATION",riskLevel:"MEDIUM",reason:"Website requires human verification",payload:{url:page.url(),screenshot:ref} as any}});await prisma.run.update({where:{id:runId},data:{status:"WAITING_HUMAN_VERIFICATION",leaseOwner:null,leaseExpiresAt:null}});await event(runId,"HUMAN_VERIFICATION_REQUIRED","CAPTCHA/bot verification detected",{url:page.url(),screenshot:ref});}
-
-export async function executeRun(runId:string){
- const owner=`worker-${process.pid}-${crypto.randomUUID()}`;const now=new Date();const lease=new Date(Date.now()+10*60_000);
- const acquired=await prisma.run.updateMany({where:{id:runId,status:{notIn:["COMPLETED","CANCELLED","REJECTED"]},OR:[{leaseExpiresAt:null},{leaseExpiresAt:{lt:now}}]},data:{leaseOwner:owner,leaseExpiresAt:lease,startedAt:now}});if(!acquired.count)return {duplicate:true};
- try{
-  let run=await prisma.run.findUniqueOrThrow({where:{id:runId},include:{agent:true,version:true}});const agent=run.agent;const allowed=agent.allowedDomains as string[];await assertSafeUrl(agent.targetUrl,allowed);const credentials=await loadCredentials(agent);
-  // If a recovery approval was granted, promote its referenced draft before resuming.
-  const approvedRecovery=await prisma.approval.findFirst({where:{runId,type:"RECOVERY",status:"APPROVED"},orderBy:{resolvedAt:"desc"}});if(approvedRecovery){const draftId=(approvedRecovery.payload as any)?.draftVersionId;if(draftId){await prisma.$transaction([prisma.agentVersion.update({where:{id:draftId},data:{status:"PRODUCTION",promotedAt:new Date()}}),prisma.agent.update({where:{id:agent.id},data:{activeVersionId:draftId}}),prisma.run.update({where:{id:runId},data:{versionId:draftId,executionMode:"FAST_PATH"}})]);run=await prisma.run.findUniqueOrThrow({where:{id:runId},include:{agent:true,version:true}});}}
-  if(run.executionMode==="DISCOVERY" || !agent.activeVersionId) return await discover(runId,run,credentials,allowed);
-  const version=await prisma.agentVersion.findUniqueOrThrow({where:{id:run.versionId||agent.activeVersionId!}});return await fast(runId,run,WorkflowSpecSchema.parse(version.workflowSpec),credentials,allowed,version);
- }catch(e:any){await prisma.run.update({where:{id:runId},data:{status:"FAILED",errorCode:"RUN_FAILED",errorMessage:String(e?.message||e),completedAt:new Date(),leaseOwner:null,leaseExpiresAt:null}});await event(runId,"RUN_FAILED",String(e?.message||e));throw e;}
+const artifacts = new ArtifactStore();
+const events = new EventBus();
+const secrets = new SecretVault();
+async function event(
+  runId: string,
+  type: string,
+  message: string,
+  metadata?: unknown,
+) {
+  await prisma.runEvent.create({
+    data: {
+      runId,
+      eventType: type,
+      source: "browser-worker",
+      message,
+      metadata: metadata as any,
+    },
+  });
+  await events
+    .publish(process.env.PUBSUB_TOPIC || "webpilot-events", {
+      runId,
+      type,
+      message,
+      metadata,
+    })
+    .catch(() => {});
+}
+async function modelCall<T>(
+  runId: string,
+  agentType: string,
+  fn: () => Promise<T>,
+) {
+  const t = Date.now();
+  try {
+    const out = await fn();
+    await prisma.modelInvocation.create({
+      data: {
+        runId,
+        agentType,
+        model: process.env.GEMINI_MODEL || "gemini-3.7-flash",
+        latencyMs: Date.now() - t,
+        success: true,
+      },
+    });
+    await prisma.run.update({
+      where: { id: runId },
+      data: { modelCallCount: { increment: 1 } },
+    });
+    return out;
+  } catch (e) {
+    await prisma.modelInvocation.create({
+      data: {
+        runId,
+        agentType,
+        model: process.env.GEMINI_MODEL || "gemini-3.7-flash",
+        latencyMs: Date.now() - t,
+        success: false,
+      },
+    });
+    throw e;
+  }
+}
+async function loadCredentials(agent: any) {
+  if (!agent.connectionId) return {};
+  const c = await prisma.connection.findUnique({
+    where: { id: agent.connectionId },
+  });
+  if (!c || c.workspaceId !== agent.workspaceId)
+    throw new Error("Invalid portal connection");
+  await assertSafeUrl(agent.targetUrl, c.allowedDomains as string[]);
+  const raw = await secrets.get(c.secretManagerRef);
+  return JSON.parse(raw);
+}
+async function checkpoint(
+  runId: string,
+  step: WorkflowStep,
+  index: number,
+  status = "COMPLETED",
+  metadata?: unknown,
+) {
+  await prisma.run.update({
+    where: { id: runId },
+    data: { currentStep: step.id },
+  });
+  await prisma.runStep.upsert({
+    where: {
+      runId_workflowStepId_sequenceNumber: {
+        runId,
+        workflowStepId: step.id,
+        sequenceNumber: index,
+      },
+    },
+    update: { status, metadata: metadata as any },
+    create: {
+      runId,
+      workflowStepId: step.id,
+      sequenceNumber: index,
+      actionType: step.type,
+      status,
+      metadata: metadata as any,
+    },
+  });
+}
+async function requiresApproval(runId: string, step: WorkflowStep) {
+  if (classifyRisk(step) !== "HIGH") return false;
+  const existing = await prisma.approval
+    .findFirst({
+      where: {
+        runId,
+        type: "HIGH_RISK_ACTION",
+        status: "APPROVED",
+        payload: { path: ["stepId"], equals: step.id } as any,
+      },
+    })
+    .catch(() => null);
+  if (existing) return false;
+  const run = await prisma.run.findUniqueOrThrow({ where: { id: runId } });
+  await prisma.approval.create({
+    data: {
+      workspaceId: run.workspaceId,
+      runId,
+      type: "HIGH_RISK_ACTION",
+      riskLevel: "HIGH",
+      reason: step.description,
+      payload: { stepId: step.id, step } as any,
+    },
+  });
+  await prisma.run.update({
+    where: { id: runId },
+    data: {
+      status: "WAITING_HIGH_RISK_APPROVAL",
+      leaseOwner: null,
+      leaseExpiresAt: null,
+    },
+  });
+  await event(
+    runId,
+    "APPROVAL_REQUIRED",
+    `High-risk action requires approval: ${step.description}`,
+    { stepId: step.id },
+  );
+  return true;
+}
+async function challengePause(runId: string, page: Page) {
+  const shot = await page.screenshot({ type: "jpeg", quality: 70 });
+  const ref = await artifacts.put(
+    `runs/${runId}/challenge.jpg`,
+    shot,
+    "image/jpeg",
+  );
+  const run = await prisma.run.findUniqueOrThrow({ where: { id: runId } });
+  await prisma.approval.create({
+    data: {
+      workspaceId: run.workspaceId,
+      runId,
+      type: "HUMAN_VERIFICATION",
+      riskLevel: "MEDIUM",
+      reason: "Website requires human verification",
+      payload: { url: page.url(), screenshot: ref } as any,
+    },
+  });
+  await prisma.run.update({
+    where: { id: runId },
+    data: {
+      status: "WAITING_HUMAN_VERIFICATION",
+      leaseOwner: null,
+      leaseExpiresAt: null,
+    },
+  });
+  await event(
+    runId,
+    "HUMAN_VERIFICATION_REQUIRED",
+    "CAPTCHA/bot verification detected",
+    { url: page.url(), screenshot: ref },
+  );
 }
 
-async function createContext(allowed:string[]){const browser=await chromium.launch({headless:true});const context=await browser.newContext();await installNetworkGuard(context);const page=await context.newPage();page.on("framenavigated",async f=>{if(f===page.mainFrame())await assertSafeUrl(f.url(),allowed).catch(()=>page.close())});return{browser,context,page};}
-async function discover(runId:string,run:any,credentials:Record<string,string>,allowed:string[]){
- await prisma.run.update({where:{id:runId},data:{status:"RUNNING_DISCOVERY",executionMode:"DISCOVERY"}});await event(runId,"DISCOVERY_STARTED","Gemini navigator started learning the workflow");
- const draft=run.version||await prisma.agentVersion.findFirstOrThrow({where:{agentId:run.agentId,status:"DRAFT"},orderBy:{createdAt:"desc"}});const planned=WorkflowSpecSchema.parse(draft.workflowSpec);const {browser,page}=await createContext(allowed);const learned:WorkflowStep[]=[];let extracted:any[]=[];
- try{await page.goto(run.agent.targetUrl,{waitUntil:"domcontentloaded"});for(let i=0;i<25;i++){if(await detectChallenge(page)){await challengePause(runId,page);return{paused:true};}const dom=await compactDom(page);const shot=(await page.screenshot({type:"jpeg",quality:55})).toString("base64");const decision=await modelCall(runId,"NAVIGATOR",()=>navigateDiscovery({goal:run.agent.goal,schema:planned.extractionSchema,url:page.url(),dom,history:learned,screenshotBase64:shot}));const step={...decision.action,id:`step_${learned.length+1}`};if(step.type==="NAVIGATE"&&step.url)await assertSafeUrl(step.url,allowed);if(await requiresApproval(runId,step))return{paused:true};const result=await executeStep(page,step,credentials,planned.extractionSchema);learned.push(step);await checkpoint(runId,step,i,"COMPLETED",{url:page.url()});if(Array.isArray(result))extracted=result;if(decision.done||step.type==="DONE")break;}
-  if(!learned.length)throw new Error("Navigator produced no workflow");const spec=WorkflowSpecSchema.parse({...planned,startUrl:run.agent.targetUrl,allowedDomains:allowed,steps:learned});const artifact=await artifacts.put(`agents/${run.agentId}/versions/v1.0/workflow.audit.js`,compileAuditArtifact(spec),"text/javascript");const prod=await prisma.$transaction(async tx=>{await tx.agentVersion.updateMany({where:{agentId:run.agentId,status:"PRODUCTION"},data:{status:"ARCHIVED"}});const v=await tx.agentVersion.create({data:{agentId:run.agentId,label:"v1.0",status:"PRODUCTION",source:"AI_DISCOVERY",parentVersionId:draft.id,workflowSpec:spec as any,extractionSchema:spec.extractionSchema as any,compiledArtifactPath:artifact,verification:{verdict:"PASS",method:"live-discovery"}}});await tx.agent.update({where:{id:run.agentId},data:{activeVersionId:v.id}});return v;});await complete(runId,prod.id,extracted,"DISCOVERY");return{ok:true,version:prod.label,records:extracted.length};
- }finally{await browser.close();}
+export async function executeRun(runId: string) {
+  const owner = `worker-${process.pid}-${crypto.randomUUID()}`;
+  const now = new Date();
+  const lease = new Date(Date.now() + 10 * 60_000);
+  const acquired = await prisma.run.updateMany({
+    where: {
+      id: runId,
+      status: { notIn: ["COMPLETED", "CANCELLED", "REJECTED"] },
+      OR: [{ leaseExpiresAt: null }, { leaseExpiresAt: { lt: now } }],
+    },
+    data: { leaseOwner: owner, leaseExpiresAt: lease, startedAt: now },
+  });
+  if (!acquired.count) return { duplicate: true };
+  try {
+    let run = await prisma.run.findUniqueOrThrow({
+      where: { id: runId },
+      include: { agent: true, version: true },
+    });
+    const agent = run.agent;
+    const allowed = agent.allowedDomains as string[];
+    await assertSafeUrl(agent.targetUrl, allowed);
+    const credentials = await loadCredentials(agent);
+    // If a recovery approval was granted, promote its referenced draft before resuming.
+    const approvedRecovery = await prisma.approval.findFirst({
+      where: { runId, type: "RECOVERY", status: "APPROVED" },
+      orderBy: { resolvedAt: "desc" },
+    });
+    if (approvedRecovery) {
+      const draftId = (approvedRecovery.payload as any)?.draftVersionId;
+      if (draftId) {
+        await prisma.$transaction([
+          prisma.agentVersion.update({
+            where: { id: draftId },
+            data: { status: "PRODUCTION", promotedAt: new Date() },
+          }),
+          prisma.agent.update({
+            where: { id: agent.id },
+            data: { activeVersionId: draftId },
+          }),
+          prisma.run.update({
+            where: { id: runId },
+            data: { versionId: draftId, executionMode: "FAST_PATH" },
+          }),
+        ]);
+        run = await prisma.run.findUniqueOrThrow({
+          where: { id: runId },
+          include: { agent: true, version: true },
+        });
+      }
+    }
+    if (run.executionMode === "DISCOVERY" || !agent.activeVersionId)
+      return await discover(runId, run, credentials, allowed);
+    const version = await prisma.agentVersion.findUniqueOrThrow({
+      where: { id: run.versionId || agent.activeVersionId! },
+    });
+    return await fast(
+      runId,
+      run,
+      WorkflowSpecSchema.parse(version.workflowSpec),
+      credentials,
+      allowed,
+      version,
+    );
+  } catch (e: any) {
+    await prisma.run.update({
+      where: { id: runId },
+      data: {
+        status: "FAILED",
+        errorCode: "RUN_FAILED",
+        errorMessage: String(e?.message || e),
+        completedAt: new Date(),
+        leaseOwner: null,
+        leaseExpiresAt: null,
+      },
+    });
+    await event(runId, "RUN_FAILED", String(e?.message || e));
+    throw e;
+  }
 }
-async function fast(runId:string,run:any,spec:WorkflowSpec,credentials:Record<string,string>,allowed:string[],version:any){
- await prisma.run.update({where:{id:runId},data:{status:"RUNNING_FAST_PATH",executionMode:"FAST_PATH",versionId:version.id}});await event(runId,"FAST_PATH_STARTED",`Executing ${version.label} with zero Gemini reasoning calls`);const {browser,page}=await createContext(allowed);let extracted:any[]=[];
- try{await page.goto(spec.startUrl,{waitUntil:"domcontentloaded",timeout:30000});for(let i=0;i<spec.steps.length;i++){const step=spec.steps[i]!;try{if(await detectChallenge(page)){await challengePause(runId,page);return{paused:true};}if(await requiresApproval(runId,step))return{paused:true};if(step.type==="NAVIGATE"&&step.url)await assertSafeUrl(step.url,allowed);const out=await executeStep(page,step,credentials,spec.extractionSchema);if(Array.isArray(out))extracted=out;await checkpoint(runId,step,i,"COMPLETED",{url:page.url()});}catch(e:any){await checkpoint(runId,step,i,"FAILED",{error:String(e.message||e),url:page.url()});return await recover(runId,run,spec,step,e,page,credentials,allowed,version,extracted);}}
-  await complete(runId,version.id,extracted,"FAST_PATH");return{ok:true,records:extracted.length};
- }finally{await browser.close();}
+
+async function createContext(allowed: string[]) {
+  const browser = await chromium.launch({ headless: true });
+  const context = await browser.newContext();
+  await installNetworkGuard(context);
+  const page = await context.newPage();
+  page.on("framenavigated", async (f) => {
+    if (f === page.mainFrame())
+      await assertSafeUrl(f.url(), allowed).catch(() => page.close());
+  });
+  return { browser, context, page };
 }
-async function recover(runId:string,run:any,spec:WorkflowSpec,failed:WorkflowStep,err:any,page:Page,credentials:Record<string,string>,allowed:string[],version:any,previous:any[]){
- const settings=await prisma.workspaceSetting.findUnique({where:{workspaceId:run.workspaceId}});const max=settings?.maxRecoveryAttempts??3;await prisma.run.update({where:{id:runId},data:{status:"RECOVERING",recoveryCount:{increment:1}}});await event(runId,"RECOVERY_STARTED",`Recovering failed step ${failed.id}`,{error:String(err.message||err)});
- let lastError=String(err.message||err);for(let attempt=1;attempt<=max;attempt++){const dom=await compactDom(page);const shot=await page.screenshot({type:"jpeg",quality:60});const shotRef=await artifacts.put(`runs/${runId}/recovery/${attempt}.jpg`,shot,"image/jpeg");const patch=await modelCall(runId,"RECOVERY",()=>recoverWorkflow({goal:run.agent.goal,workflow:spec,failedStep:failed,error:lastError,url:page.url(),dom,screenshotBase64:shot.toString("base64")}));const patched=applyPatch(spec,patch);const verification=await sandboxVerify(patched,failed.id,credentials,allowed);const verdict=await modelCall(runId,"VERIFIER",()=>verifyRecovery({patch,verification,expectedGoal:run.agent.goal}));await prisma.recoveryAttempt.create({data:{runId,attemptNumber:attempt,failedStepId:failed.id,diagnosis:{text:patch.diagnosis,error:lastError,screenshot:shotRef},patch:patch as any,confidence:patch.confidence,riskLevel:patch.risk,verification:verdict as any}});
-  if(verdict.verdict!=="PASS"){lastError=verification.error||verdict.reason;continue;}const label=nextVersionLabel(version.label,"RECOVERY",true);const artifact=await artifacts.put(`agents/${run.agentId}/versions/${label}/workflow.audit.js`,compileAuditArtifact(patched),"text/javascript");const draft=await prisma.agentVersion.create({data:{agentId:run.agentId,label,status:"DRAFT",source:"AI_RECOVERY",parentVersionId:version.id,workflowSpec:patched as any,extractionSchema:patched.extractionSchema as any,compiledArtifactPath:artifact,verification:verdict as any,riskLevel:patch.risk}});
-  if(patch.risk!=="LOW" || !(settings?.autoPromoteLowRisk??true)){await prisma.approval.create({data:{workspaceId:run.workspaceId,runId,type:"RECOVERY",riskLevel:patch.risk,reason:`Approve recovered ${failed.id}`,payload:{draftVersionId:draft.id,patch} as any}});await prisma.run.update({where:{id:runId},data:{status:"WAITING_RECOVERY_APPROVAL",leaseOwner:null,leaseExpiresAt:null}});await event(runId,"RECOVERY_APPROVAL_REQUIRED",`Recovery ${label} requires approval`,{draftVersionId:draft.id});return{paused:true};}
-  const prodLabel=label.replace("-draft","");await prisma.$transaction([prisma.agentVersion.updateMany({where:{agentId:run.agentId,status:"PRODUCTION"},data:{status:"ARCHIVED"}}),prisma.agentVersion.update({where:{id:draft.id},data:{status:"PRODUCTION",label:prodLabel,promotedAt:new Date()}}),prisma.agent.update({where:{id:run.agentId},data:{activeVersionId:draft.id}}),prisma.run.update({where:{id:runId},data:{versionId:draft.id,status:"QUEUED"}})]);await event(runId,"RECOVERY_PROMOTED",`${prodLabel} verified and promoted`);
-  // Finish current page with repaired step and remaining steps; avoids replaying prior side effects.
-  const repaired=patched.steps.find(s=>s.id===failed.id)!;const idx=patched.steps.findIndex(s=>s.id===failed.id);let extracted=previous;if(await requiresApproval(runId,repaired))return{paused:true};const first=await executeStep(page,repaired,credentials,patched.extractionSchema);if(Array.isArray(first))extracted=first;await checkpoint(runId,repaired,idx,"COMPLETED",{recovered:true});for(let i=idx+1;i<patched.steps.length;i++){const step=patched.steps[i]!;if(await requiresApproval(runId,step))return{paused:true};const out=await executeStep(page,step,credentials,patched.extractionSchema);if(Array.isArray(out))extracted=out;await checkpoint(runId,step,i,"COMPLETED");}await complete(runId,draft.id,extracted,"RECOVERED_FAST_PATH");return{ok:true,recovered:true};}
- throw new Error(`Recovery exhausted after ${max} attempts: ${lastError}`);
+async function discover(
+  runId: string,
+  run: any,
+  credentials: Record<string, string>,
+  allowed: string[],
+) {
+  await prisma.run.update({
+    where: { id: runId },
+    data: { status: "RUNNING_DISCOVERY", executionMode: "DISCOVERY" },
+  });
+  await event(
+    runId,
+    "DISCOVERY_STARTED",
+    "Gemini navigator started learning the workflow",
+  );
+  const draft =
+    run.version ||
+    (await prisma.agentVersion.findFirstOrThrow({
+      where: { agentId: run.agentId, status: "DRAFT" },
+      orderBy: { createdAt: "desc" },
+    }));
+  const planned = WorkflowSpecSchema.parse(draft.workflowSpec);
+  const { browser, page } = await createContext(allowed);
+  const learned: WorkflowStep[] = [];
+  let extracted: any[] = [];
+  try {
+    await page.goto(run.agent.targetUrl, { waitUntil: "domcontentloaded" });
+    for (let i = 0; i < 25; i++) {
+      if (await detectChallenge(page)) {
+        await challengePause(runId, page);
+        return { paused: true };
+      }
+      const dom = await compactDom(page);
+      const shot = (
+        await page.screenshot({ type: "jpeg", quality: 55 })
+      ).toString("base64");
+      const decision = await modelCall(runId, "NAVIGATOR", () =>
+        navigateDiscovery({
+          goal: run.agent.goal,
+          schema: planned.extractionSchema,
+          url: page.url(),
+          dom,
+          history: learned,
+          screenshotBase64: shot,
+        }),
+      );
+      const step = { ...decision.action, id: `step_${learned.length + 1}` };
+      if (step.type === "NAVIGATE" && step.url)
+        await assertSafeUrl(step.url, allowed);
+      if (await requiresApproval(runId, step)) return { paused: true };
+      const result = await executeStep(
+        page,
+        step,
+        credentials,
+        planned.extractionSchema,
+      );
+      learned.push(step);
+      await checkpoint(runId, step, i, "COMPLETED", { url: page.url() });
+      if (Array.isArray(result)) extracted = result;
+      if (decision.done || step.type === "DONE") break;
+    }
+    if (!learned.length) throw new Error("Navigator produced no workflow");
+    const spec = WorkflowSpecSchema.parse({
+      ...planned,
+      startUrl: run.agent.targetUrl,
+      allowedDomains: allowed,
+      steps: learned,
+    });
+    const artifact = await artifacts.put(
+      `agents/${run.agentId}/versions/v1.0/workflow.audit.js`,
+      compileAuditArtifact(spec),
+      "text/javascript",
+    );
+    const prod = await prisma.$transaction(
+      async (tx: Prisma.TransactionClient) => {
+        await tx.agentVersion.updateMany({
+          where: { agentId: run.agentId, status: "PRODUCTION" },
+          data: { status: "ARCHIVED" },
+        });
+        const v = await tx.agentVersion.create({
+          data: {
+            agentId: run.agentId,
+            label: "v1.0",
+            status: "PRODUCTION",
+            source: "AI_DISCOVERY",
+            parentVersionId: draft.id,
+            workflowSpec: spec as any,
+            extractionSchema: spec.extractionSchema as any,
+            compiledArtifactPath: artifact,
+            verification: { verdict: "PASS", method: "live-discovery" },
+          },
+        });
+        await tx.agent.update({
+          where: { id: run.agentId },
+          data: { activeVersionId: v.id },
+        });
+        return v;
+      },
+    );
+    await complete(runId, prod.id, extracted, "DISCOVERY");
+    return { ok: true, version: prod.label, records: extracted.length };
+  } finally {
+    await browser.close();
+  }
 }
-async function sandboxVerify(spec:WorkflowSpec,failedStepId:string,credentials:Record<string,string>,allowed:string[]){const idx=spec.steps.findIndex(s=>s.id===failedStepId);if(spec.steps.slice(0,idx).some(s=>classifyRisk(s)==="HIGH"))return{passed:false,error:"Cannot safely replay prior high-risk step",requiresHuman:true};const {browser,page}=await createContext(allowed);try{await page.goto(spec.startUrl,{waitUntil:"domcontentloaded",timeout:30000});for(let i=0;i<=idx;i++){const s=spec.steps[i]!;if(classifyRisk(s)==="HIGH")return{passed:false,error:"Patch itself is high risk",requiresHuman:true};await executeStep(page,s,credentials,spec.extractionSchema);}return{passed:true,url:page.url()};}catch(e:any){return{passed:false,error:String(e.message||e),url:page.url()};}finally{await browser.close();}}
-async function complete(runId:string,versionId:string,records:any[],mode:string){const result={records,count:records.length};const ref=await artifacts.put(`runs/${runId}/result.json`,JSON.stringify(result,null,2),"application/json");await prisma.run.update({where:{id:runId},data:{status:"COMPLETED",versionId,executionMode:mode,result:{...result,artifact:ref} as any,completedAt:new Date(),leaseOwner:null,leaseExpiresAt:null}});await event(runId,"RUN_COMPLETED",`Run completed with ${records.length} records`,{artifact:ref,records:records.length});}
+async function fast(
+  runId: string,
+  run: any,
+  spec: WorkflowSpec,
+  credentials: Record<string, string>,
+  allowed: string[],
+  version: any,
+) {
+  await prisma.run.update({
+    where: { id: runId },
+    data: {
+      status: "RUNNING_FAST_PATH",
+      executionMode: "FAST_PATH",
+      versionId: version.id,
+    },
+  });
+  await event(
+    runId,
+    "FAST_PATH_STARTED",
+    `Executing ${version.label} with zero Gemini reasoning calls`,
+  );
+  const { browser, page } = await createContext(allowed);
+  let extracted: any[] = [];
+  try {
+    await page.goto(spec.startUrl, {
+      waitUntil: "domcontentloaded",
+      timeout: 30000,
+    });
+    for (let i = 0; i < spec.steps.length; i++) {
+      const step = spec.steps[i]!;
+      try {
+        if (await detectChallenge(page)) {
+          await challengePause(runId, page);
+          return { paused: true };
+        }
+        if (await requiresApproval(runId, step)) return { paused: true };
+        if (step.type === "NAVIGATE" && step.url)
+          await assertSafeUrl(step.url, allowed);
+        const out = await executeStep(
+          page,
+          step,
+          credentials,
+          spec.extractionSchema,
+        );
+        if (Array.isArray(out)) extracted = out;
+        await checkpoint(runId, step, i, "COMPLETED", { url: page.url() });
+      } catch (e: any) {
+        await checkpoint(runId, step, i, "FAILED", {
+          error: String(e.message || e),
+          url: page.url(),
+        });
+        return await recover(
+          runId,
+          run,
+          spec,
+          step,
+          e,
+          page,
+          credentials,
+          allowed,
+          version,
+          extracted,
+        );
+      }
+    }
+    await complete(runId, version.id, extracted, "FAST_PATH");
+    return { ok: true, records: extracted.length };
+  } finally {
+    await browser.close();
+  }
+}
+async function recover(
+  runId: string,
+  run: any,
+  spec: WorkflowSpec,
+  failed: WorkflowStep,
+  err: any,
+  page: Page,
+  credentials: Record<string, string>,
+  allowed: string[],
+  version: any,
+  previous: any[],
+) {
+  const settings = await prisma.workspaceSetting.findUnique({
+    where: { workspaceId: run.workspaceId },
+  });
+  const max = settings?.maxRecoveryAttempts ?? 3;
+  await prisma.run.update({
+    where: { id: runId },
+    data: { status: "RECOVERING", recoveryCount: { increment: 1 } },
+  });
+  await event(
+    runId,
+    "RECOVERY_STARTED",
+    `Recovering failed step ${failed.id}`,
+    { error: String(err.message || err) },
+  );
+  let lastError = String(err.message || err);
+  for (let attempt = 1; attempt <= max; attempt++) {
+    const dom = await compactDom(page);
+    const shot = await page.screenshot({ type: "jpeg", quality: 60 });
+    const shotRef = await artifacts.put(
+      `runs/${runId}/recovery/${attempt}.jpg`,
+      shot,
+      "image/jpeg",
+    );
+    const patch = await modelCall(runId, "RECOVERY", () =>
+      recoverWorkflow({
+        goal: run.agent.goal,
+        workflow: spec,
+        failedStep: failed,
+        error: lastError,
+        url: page.url(),
+        dom,
+        screenshotBase64: shot.toString("base64"),
+      }),
+    );
+    const patched = applyPatch(spec, patch);
+    const verification = await sandboxVerify(
+      patched,
+      failed.id,
+      credentials,
+      allowed,
+    );
+    const verdict = await modelCall(runId, "VERIFIER", () =>
+      verifyRecovery({ patch, verification, expectedGoal: run.agent.goal }),
+    );
+    await prisma.recoveryAttempt.create({
+      data: {
+        runId,
+        attemptNumber: attempt,
+        failedStepId: failed.id,
+        diagnosis: {
+          text: patch.diagnosis,
+          error: lastError,
+          screenshot: shotRef,
+        },
+        patch: patch as any,
+        confidence: patch.confidence,
+        riskLevel: patch.risk,
+        verification: verdict as any,
+      },
+    });
+    if (verdict.verdict !== "PASS") {
+      lastError = verification.error || verdict.reason;
+      continue;
+    }
+    const label = nextVersionLabel(version.label, "RECOVERY", true);
+    const artifact = await artifacts.put(
+      `agents/${run.agentId}/versions/${label}/workflow.audit.js`,
+      compileAuditArtifact(patched),
+      "text/javascript",
+    );
+    const draft = await prisma.agentVersion.create({
+      data: {
+        agentId: run.agentId,
+        label,
+        status: "DRAFT",
+        source: "AI_RECOVERY",
+        parentVersionId: version.id,
+        workflowSpec: patched as any,
+        extractionSchema: patched.extractionSchema as any,
+        compiledArtifactPath: artifact,
+        verification: verdict as any,
+        riskLevel: patch.risk,
+      },
+    });
+    if (patch.risk !== "LOW" || !(settings?.autoPromoteLowRisk ?? true)) {
+      await prisma.approval.create({
+        data: {
+          workspaceId: run.workspaceId,
+          runId,
+          type: "RECOVERY",
+          riskLevel: patch.risk,
+          reason: `Approve recovered ${failed.id}`,
+          payload: { draftVersionId: draft.id, patch } as any,
+        },
+      });
+      await prisma.run.update({
+        where: { id: runId },
+        data: {
+          status: "WAITING_RECOVERY_APPROVAL",
+          leaseOwner: null,
+          leaseExpiresAt: null,
+        },
+      });
+      await event(
+        runId,
+        "RECOVERY_APPROVAL_REQUIRED",
+        `Recovery ${label} requires approval`,
+        { draftVersionId: draft.id },
+      );
+      return { paused: true };
+    }
+    const prodLabel = label.replace("-draft", "");
+    await prisma.$transaction([
+      prisma.agentVersion.updateMany({
+        where: { agentId: run.agentId, status: "PRODUCTION" },
+        data: { status: "ARCHIVED" },
+      }),
+      prisma.agentVersion.update({
+        where: { id: draft.id },
+        data: {
+          status: "PRODUCTION",
+          label: prodLabel,
+          promotedAt: new Date(),
+        },
+      }),
+      prisma.agent.update({
+        where: { id: run.agentId },
+        data: { activeVersionId: draft.id },
+      }),
+      prisma.run.update({
+        where: { id: runId },
+        data: { versionId: draft.id, status: "QUEUED" },
+      }),
+    ]);
+    await event(
+      runId,
+      "RECOVERY_PROMOTED",
+      `${prodLabel} verified and promoted`,
+    );
+    // Finish current page with repaired step and remaining steps; avoids replaying prior side effects.
+    const repaired = patched.steps.find((s) => s.id === failed.id)!;
+    const idx = patched.steps.findIndex((s) => s.id === failed.id);
+    let extracted = previous;
+    if (await requiresApproval(runId, repaired)) return { paused: true };
+    const first = await executeStep(
+      page,
+      repaired,
+      credentials,
+      patched.extractionSchema,
+    );
+    if (Array.isArray(first)) extracted = first;
+    await checkpoint(runId, repaired, idx, "COMPLETED", { recovered: true });
+    for (let i = idx + 1; i < patched.steps.length; i++) {
+      const step = patched.steps[i]!;
+      if (await requiresApproval(runId, step)) return { paused: true };
+      const out = await executeStep(
+        page,
+        step,
+        credentials,
+        patched.extractionSchema,
+      );
+      if (Array.isArray(out)) extracted = out;
+      await checkpoint(runId, step, i, "COMPLETED");
+    }
+    await complete(runId, draft.id, extracted, "RECOVERED_FAST_PATH");
+    return { ok: true, recovered: true };
+  }
+  throw new Error(`Recovery exhausted after ${max} attempts: ${lastError}`);
+}
+async function sandboxVerify(
+  spec: WorkflowSpec,
+  failedStepId: string,
+  credentials: Record<string, string>,
+  allowed: string[],
+) {
+  const idx = spec.steps.findIndex((s) => s.id === failedStepId);
+  if (spec.steps.slice(0, idx).some((s) => classifyRisk(s) === "HIGH"))
+    return {
+      passed: false,
+      error: "Cannot safely replay prior high-risk step",
+      requiresHuman: true,
+    };
+  const { browser, page } = await createContext(allowed);
+  try {
+    await page.goto(spec.startUrl, {
+      waitUntil: "domcontentloaded",
+      timeout: 30000,
+    });
+    for (let i = 0; i <= idx; i++) {
+      const s = spec.steps[i]!;
+      if (classifyRisk(s) === "HIGH")
+        return {
+          passed: false,
+          error: "Patch itself is high risk",
+          requiresHuman: true,
+        };
+      await executeStep(page, s, credentials, spec.extractionSchema);
+    }
+    return { passed: true, url: page.url() };
+  } catch (e: any) {
+    return { passed: false, error: String(e.message || e), url: page.url() };
+  } finally {
+    await browser.close();
+  }
+}
+async function complete(
+  runId: string,
+  versionId: string,
+  records: any[],
+  mode: string,
+) {
+  const result = { records, count: records.length };
+  const ref = await artifacts.put(
+    `runs/${runId}/result.json`,
+    JSON.stringify(result, null, 2),
+    "application/json",
+  );
+  await prisma.run.update({
+    where: { id: runId },
+    data: {
+      status: "COMPLETED",
+      versionId,
+      executionMode: mode,
+      result: { ...result, artifact: ref } as any,
+      completedAt: new Date(),
+      leaseOwner: null,
+      leaseExpiresAt: null,
+    },
+  });
+  await event(
+    runId,
+    "RUN_COMPLETED",
+    `Run completed with ${records.length} records`,
+    { artifact: ref, records: records.length },
+  );
+}

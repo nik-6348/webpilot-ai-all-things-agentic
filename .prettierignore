@@ -1,0 +1,11 @@
+node_modules
+.turbo
+.next
+dist
+coverage
+.pnpm-store
+**/.next
+**/dist
+infra/terraform/.terraform
+packages/database/generated
+pnpm-lock.yaml

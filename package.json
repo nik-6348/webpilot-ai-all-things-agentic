@@ -13,9 +13,13 @@
     "db:migrate": "pnpm --filter @webpilot/database migrate:deploy",
     "db:seed": "pnpm --filter @webpilot/database seed",
     "preflight": "node scripts/preflight.mjs",
-    "demo:e2e": "node tests/demo-e2e.mjs"
+    "demo:e2e": "node tests/demo-e2e.mjs",
+    "format": "prettier --write \"**/*.{ts,tsx,js,mjs,cjs,json,md,css,scss,yml,yaml,html}\"",
+    "format:check": "prettier --check \"**/*.{ts,tsx,js,mjs,cjs,json,md,css,scss,yml,yaml,html}\""
   },
   "devDependencies": {
+    "@types/node": "^22.20.1",
+    "prettier": "^3.9.6",
     "turbo": "2.5.6",
     "typescript": "5.9.2"
   }

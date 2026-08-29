@@ -1,6 +1,81 @@
-import { Controller, Get, Param, Post, Query, Req } from "@nestjs/common";import { prisma } from "@webpilot/database";import { TaskQueue } from "@webpilot/gcp";import { requireWorkspace,audit } from "../common/context.js";
-@Controller("approvals") export class ApprovalsController{
- @Get() async list(@Req() req:any,@Query("workspaceId") workspaceId?:string){const m=await requireWorkspace(req.user.id,workspaceId);return prisma.approval.findMany({where:{workspaceId:m.workspaceId,status:"PENDING"},include:{run:{include:{agent:true}}},orderBy:{requestedAt:"desc"}})}
- @Post(":id/approve") async approve(@Req() req:any,@Param("id") id:string){const ap=await prisma.approval.findUniqueOrThrow({where:{id},include:{run:true}});await requireWorkspace(req.user.id,ap.workspaceId,["OWNER","ADMIN","OPERATOR"]);if(ap.status!=="PENDING") return ap;await prisma.$transaction(async tx=>{await tx.approval.update({where:{id},data:{status:"APPROVED",resolvedBy:req.user.id,resolvedAt:new Date()}});if(ap.runId) await tx.run.update({where:{id:ap.runId},data:{status:"QUEUED"}});});if(ap.runId) await new TaskQueue().enqueueRun(ap.runId);await audit(ap.workspaceId,req.user.id,"APPROVAL_APPROVED","approval",id);return{ok:true};}
- @Post(":id/reject") async reject(@Req() req:any,@Param("id") id:string){const ap=await prisma.approval.findUniqueOrThrow({where:{id},include:{run:true}});await requireWorkspace(req.user.id,ap.workspaceId,["OWNER","ADMIN","OPERATOR"]);await prisma.$transaction(async tx=>{await tx.approval.update({where:{id},data:{status:"REJECTED",resolvedBy:req.user.id,resolvedAt:new Date()}});if(ap.runId) await tx.run.update({where:{id:ap.runId},data:{status:"REJECTED"}});});return{ok:true};}
+import { Controller, Get, Param, Post, Query, Req } from "@nestjs/common";
+import { prisma, type Prisma } from "@webpilot/database";
+import { TaskQueue } from "@webpilot/gcp";
+import { requireWorkspace, audit } from "../common/context.js";
+@Controller("approvals")
+export class ApprovalsController {
+  @Get() async list(
+    @Req() req: any,
+    @Query("workspaceId") workspaceId?: string,
+  ) {
+    const m = await requireWorkspace(req.user.id, workspaceId);
+    return prisma.approval.findMany({
+      where: { workspaceId: m.workspaceId, status: "PENDING" },
+      include: { run: { include: { agent: true } } },
+      orderBy: { requestedAt: "desc" },
+    });
+  }
+  @Post(":id/approve") async approve(@Req() req: any, @Param("id") id: string) {
+    const ap = await prisma.approval.findUniqueOrThrow({
+      where: { id },
+      include: { run: true },
+    });
+    await requireWorkspace(req.user.id, ap.workspaceId, [
+      "OWNER",
+      "ADMIN",
+      "OPERATOR",
+    ]);
+    if (ap.status !== "PENDING") return ap;
+    await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+      await tx.approval.update({
+        where: { id },
+        data: {
+          status: "APPROVED",
+          resolvedBy: req.user.id,
+          resolvedAt: new Date(),
+        },
+      });
+      if (ap.runId)
+        await tx.run.update({
+          where: { id: ap.runId },
+          data: { status: "QUEUED" },
+        });
+    });
+    if (ap.runId) await new TaskQueue().enqueueRun(ap.runId);
+    await audit(
+      ap.workspaceId,
+      req.user.id,
+      "APPROVAL_APPROVED",
+      "approval",
+      id,
+    );
+    return { ok: true };
+  }
+  @Post(":id/reject") async reject(@Req() req: any, @Param("id") id: string) {
+    const ap = await prisma.approval.findUniqueOrThrow({
+      where: { id },
+      include: { run: true },
+    });
+    await requireWorkspace(req.user.id, ap.workspaceId, [
+      "OWNER",
+      "ADMIN",
+      "OPERATOR",
+    ]);
+    await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+      await tx.approval.update({
+        where: { id },
+        data: {
+          status: "REJECTED",
+          resolvedBy: req.user.id,
+          resolvedAt: new Date(),
+        },
+      });
+      if (ap.runId)
+        await tx.run.update({
+          where: { id: ap.runId },
+          data: { status: "REJECTED" },
+        });
+    });
+    return { ok: true };
+  }
 }

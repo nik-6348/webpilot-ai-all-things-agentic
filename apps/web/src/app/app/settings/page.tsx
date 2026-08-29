@@ -1,3 +1,99 @@
 "use client";
-import {useEffect,useState} from "react";import {api,workspace} from "../../../lib/api";
-export default function Settings(){const[s,setS]=useState<any>();const[wid,setWid]=useState("");const[msg,setMsg]=useState("");useEffect(()=>{workspace().then(async w=>{if(!w)return;setWid(w.id);setS(await api(`/api/v1/settings?workspaceId=${w.id}`))})},[]);async function save(e:any){e.preventDefault();setMsg("");const next=await api(`/api/v1/settings?workspaceId=${wid}`,{method:"PATCH",body:JSON.stringify({defaultModel:s.defaultModel,maxRunDuration:Number(s.maxRunDuration),maxRecoveryAttempts:Number(s.maxRecoveryAttempts),retentionDays:Number(s.retentionDays),autoPromoteLowRisk:Boolean(s.autoPromoteLowRisk)})});setS(next);setMsg("Saved")};if(!s)return <div className="muted">Loading…</div>;return <><div className="pageHead"><div><div className="kicker">Runtime policy</div><h1>Settings</h1></div></div><form className="card form" onSubmit={save}><label>Default model<input value={s.defaultModel} onChange={e=>setS({...s,defaultModel:e.target.value})}/></label><div className="cols2"><label>Max run duration (sec)<input type="number" min="60" max="3600" value={s.maxRunDuration} onChange={e=>setS({...s,maxRunDuration:e.target.value})}/></label><label>Recovery attempts<input type="number" min="0" max="5" value={s.maxRecoveryAttempts} onChange={e=>setS({...s,maxRecoveryAttempts:e.target.value})}/></label></div><div className="cols2"><label>Retention days<input type="number" min="7" max="365" value={s.retentionDays} onChange={e=>setS({...s,retentionDays:e.target.value})}/></label><label className="check"><input type="checkbox" checked={s.autoPromoteLowRisk} onChange={e=>setS({...s,autoPromoteLowRisk:e.target.checked})}/> Auto-promote verified low-risk recovery</label></div><button className="btn primary">Save settings</button>{msg&&<span className="good">{msg}</span>}</form></>}
+import { useEffect, useState } from "react";
+import { api, workspace } from "../../../lib/api";
+export default function Settings() {
+  const [s, setS] = useState<any>();
+  const [wid, setWid] = useState("");
+  const [msg, setMsg] = useState("");
+  useEffect(() => {
+    workspace().then(async (w) => {
+      if (!w) return;
+      setWid(w.id);
+      setS(await api(`/api/v1/settings?workspaceId=${w.id}`));
+    });
+  }, []);
+  async function save(e: any) {
+    e.preventDefault();
+    setMsg("");
+    const next = await api(`/api/v1/settings?workspaceId=${wid}`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        defaultModel: s.defaultModel,
+        maxRunDuration: Number(s.maxRunDuration),
+        maxRecoveryAttempts: Number(s.maxRecoveryAttempts),
+        retentionDays: Number(s.retentionDays),
+        autoPromoteLowRisk: Boolean(s.autoPromoteLowRisk),
+      }),
+    });
+    setS(next);
+    setMsg("Saved");
+  }
+  if (!s) return <div className="muted">Loading…</div>;
+  return (
+    <>
+      <div className="pageHead">
+        <div>
+          <div className="kicker">Runtime policy</div>
+          <h1>Settings</h1>
+        </div>
+      </div>
+      <form className="card form" onSubmit={save}>
+        <label>
+          Default model
+          <input
+            value={s.defaultModel}
+            onChange={(e) => setS({ ...s, defaultModel: e.target.value })}
+          />
+        </label>
+        <div className="cols2">
+          <label>
+            Max run duration (sec)
+            <input
+              type="number"
+              min="60"
+              max="3600"
+              value={s.maxRunDuration}
+              onChange={(e) => setS({ ...s, maxRunDuration: e.target.value })}
+            />
+          </label>
+          <label>
+            Recovery attempts
+            <input
+              type="number"
+              min="0"
+              max="5"
+              value={s.maxRecoveryAttempts}
+              onChange={(e) =>
+                setS({ ...s, maxRecoveryAttempts: e.target.value })
+              }
+            />
+          </label>
+        </div>
+        <div className="cols2">
+          <label>
+            Retention days
+            <input
+              type="number"
+              min="7"
+              max="365"
+              value={s.retentionDays}
+              onChange={(e) => setS({ ...s, retentionDays: e.target.value })}
+            />
+          </label>
+          <label className="check">
+            <input
+              type="checkbox"
+              checked={s.autoPromoteLowRisk}
+              onChange={(e) =>
+                setS({ ...s, autoPromoteLowRisk: e.target.checked })
+              }
+            />{" "}
+            Auto-promote verified low-risk recovery
+          </label>
+        </div>
+        <button className="btn primary">Save settings</button>
+        {msg && <span className="good">{msg}</span>}
+      </form>
+    </>
+  );
+}

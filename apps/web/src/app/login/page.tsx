@@ -1,2 +1,49 @@
-"use client";import { useState } from "react";import { useRouter } from "next/navigation";import { googleLogin } from "../../lib/firebase";import { api } from "../../lib/api";
-export default function Login(){const [err,setErr]=useState("");const router=useRouter();async function go(){try{if(process.env.NEXT_PUBLIC_LOCAL_AUTH_BYPASS!=="true")await googleLogin();const ws=await api<any[]>("/api/v1/workspaces");if(!ws.length)await api("/api/v1/workspaces",{method:"POST",body:JSON.stringify({name:"My WebPilot Workspace",slug:`workspace-${Date.now()}`})});router.push("/app");}catch(e:any){setErr(e.message)}}return <div className="login"><div className="card loginCard"><div className="brand">WebPilot<span>.AI</span></div><h1>Welcome back</h1><p className="muted">Continue with your Google account to access your autonomous web operations workspace.</p><button className="btn primary" style={{width:"100%",marginTop:18}} onClick={go}>Continue with Google</button>{err&&<p className="danger">{err}</p>}</div></div>}
+"use client";
+import { useState } from "react";
+import { useRouter } from "next/navigation";
+import { googleLogin } from "../../lib/firebase";
+import { api } from "../../lib/api";
+export default function Login() {
+  const [err, setErr] = useState("");
+  const router = useRouter();
+  async function go() {
+    try {
+      if (process.env.NEXT_PUBLIC_LOCAL_AUTH_BYPASS !== "true")
+        await googleLogin();
+      const ws = await api<any[]>("/api/v1/workspaces");
+      if (!ws.length)
+        await api("/api/v1/workspaces", {
+          method: "POST",
+          body: JSON.stringify({
+            name: "My WebPilot Workspace",
+            slug: `workspace-${Date.now()}`,
+          }),
+        });
+      router.push("/app");
+    } catch (e: any) {
+      setErr(e.message);
+    }
+  }
+  return (
+    <div className="login">
+      <div className="card loginCard">
+        <div className="brand">
+          WebPilot<span>.AI</span>
+        </div>
+        <h1>Welcome back</h1>
+        <p className="muted">
+          Continue with your Google account to access your autonomous web
+          operations workspace.
+        </p>
+        <button
+          className="btn primary"
+          style={{ width: "100%", marginTop: 18 }}
+          onClick={go}
+        >
+          Continue with Google
+        </button>
+        {err && <p className="danger">{err}</p>}
+      </div>
+    </div>
+  );
+}

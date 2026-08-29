@@ -1,5 +1,6 @@
 FROM node:22-bookworm-slim AS build
 WORKDIR /app
+ENV CI=true
 RUN corepack enable
 COPY . .
 ARG NEXT_PUBLIC_FIREBASE_API_KEY

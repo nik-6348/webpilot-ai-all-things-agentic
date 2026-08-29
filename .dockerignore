@@ -1,14 +1,11 @@
 node_modules
 .pnpm-store
-.env
-.env.*
-!.env.example
+.turbo
 .next
 dist
 coverage
 *.log
+.git
 .DS_Store
 packages/database/generated
-.turbo
-*.tsbuildinfo
-
+infra/terraform/.terraform

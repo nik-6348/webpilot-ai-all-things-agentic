@@ -1,3 +1,54 @@
-import Link from "next/link";import { Bot, Bolt, ShieldCheck, Workflow, RefreshCcw, Gauge } from "lucide-react";
-export default function Home(){return <><div className="container"><nav className="nav"><div className="brand">WebPilot<span>.AI</span></div><div><Link className="btn ghost" href="/login">Sign in</Link> <Link className="btn primary" href="/login">Build an agent</Link></div></nav><section className="hero"><div><div className="kicker">Autonomous Web Operations</div><h1>Teach it once. <em>Run it fast forever.</em></h1><p>Describe a repetitive web workflow in plain English. Gemini learns it, WebPilot turns it into deterministic browser automation, and AI wakes up again only when the web changes.</p><div className="actions"><Link className="btn primary" href="/login">Build your first agent</Link><a className="btn" href="#how">See how it works</a></div></div><div className="terminal"><div className="termbar"><i className="dot"/><i className="dot"/><i className="dot"/></div><div className="timeline"><div className="event ai"><i className="pulse"/><span><b>Gemini planned workflow</b><br/><span className="muted">schema + navigation + safety policy</span></span><span className="tag">AI</span></div><div className="event"><i className="pulse"/><span><b>v1.0 learned from live browser</b><br/><span className="muted">immutable WorkflowSpec stored</span></span><span className="tag">47s</span></div><div className="event"><i className="pulse"/><span><b>Next run: deterministic fast path</b><br/><span className="muted">Playwright • 0 Gemini reasoning calls</span></span><span className="tag">7.8s</span></div><div className="event ai"><i className="pulse"/><span><b>DOM drift detected → healed</b><br/><span className="muted">patch verified • v1.1 promoted</span></span><span className="tag">self-heal</span></div></div></div></section></div><section id="how" className="section"><div className="container"><div className="kicker">Designed for real work</div><h2>AI where intelligence matters.<br/>Determinism where it doesn’t.</h2><div className="grid3"><Feature icon={<Workflow/>} title="Understand & learn" text="Planner and live Navigator use Gemini through Google ADK to learn a real browser workflow."/><Feature icon={<Bolt/>} title="Compile & repeat" text="Successful workflows become typed, immutable specs executed without reasoning on healthy repeat runs."/><Feature icon={<RefreshCcw/>} title="Detect & recover" text="Screenshot, DOM and failure context wake the Recovery Agent only when reality changes."/><Feature icon={<ShieldCheck/>} title="Human approval" text="High-risk actions, recoveries and human verification pause safely and resume from checkpoints."/><Feature icon={<Gauge/>} title="Observable by default" text="Runs expose model calls, latency, versions, events, retries and avoided AI work."/><Feature icon={<Bot/>} title="Google-native" text="Vertex AI, ADK, Cloud Run, Cloud SQL, Tasks, Pub/Sub, GCS, Scheduler and Secret Manager."/></div></div></section></>}
-function Feature({icon,title,text}:{icon:React.ReactNode,title:string,text:string}){return <div className="card"><div style={{color:"var(--accent2)"}}>{icon}</div><h3>{title}</h3><p className="muted">{text}</p></div>}
+"use client";
+import { useEffect, useState } from "react";
+import { api, workspace } from "../lib/api";
+import Link from "next/link";
+export default function Dashboard() {
+  const [data, setData] = useState<any>();
+  useEffect(() => {
+    workspace()
+      .then(
+        (w: { id: string } | null) =>
+          w && api(`/api/v1/analytics?workspaceId=${w.id}`),
+      )
+      .then(setData);
+  }, []);
+  const d = data || {};
+  return (
+    <>
+      <div className="pageHead">
+        <div>
+          <div className="kicker">Command center</div>
+          <h1>Autonomous operations</h1>
+          <p className="muted">
+            See what WebPilot is doing, what it healed, and where it needs you.
+          </p>
+        </div>
+        <Link className="btn primary" href="/app/agents/new">
+          New agent
+        </Link>
+      </div>
+      <div className="stats">
+        <Stat label="Runs" value={d.runs ?? "—"} />
+        <Stat label="Completed" value={d.completed ?? "—"} />
+        <Stat label="Zero-LLM runs" value={d.zeroLlm ?? "—"} />
+        <Stat label="Model calls" value={d.modelCalls ?? "—"} />
+      </div>
+      <div className="card">
+        <h3>Architecture signal</h3>
+        <p className="muted">
+          Healthy repeat runs should trend toward{" "}
+          <b style={{ color: "white" }}>zero model calls</b>. Gemini is reserved
+          for first-time understanding and recovery.
+        </p>
+      </div>
+    </>
+  );
+}
+function Stat({ label, value }: { label: string; value: any }) {
+  return (
+    <div className="card">
+      <div className="muted">{label}</div>
+      <div className="metric">{value}</div>
+    </div>
+  );
+}

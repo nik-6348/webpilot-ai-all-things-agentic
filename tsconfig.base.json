@@ -9,6 +9,7 @@
     "resolveJsonModule": true,
     "declaration": true,
     "sourceMap": true,
-    "noUncheckedIndexedAccess": true
+    "noUncheckedIndexedAccess": true,
+    "types": ["node"]
   }
 }

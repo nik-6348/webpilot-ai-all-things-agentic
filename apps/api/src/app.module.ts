@@ -10,5 +10,18 @@ import { SchedulesController } from "./modules/schedules.controller.js";
 import { ConnectionsController } from "./modules/connections.controller.js";
 import { IntegrationsController } from "./modules/integrations.controller.js";
 import { AdminController } from "./modules/admin.controller.js";
-@Module({controllers:[HealthController,WorkspacesController,AgentsController,RunsController,ApprovalsController,SchedulesController,ConnectionsController,IntegrationsController,AdminController],providers:[{provide:APP_GUARD,useClass:AuthGuard}]})
-export class AppModule{}
+@Module({
+  controllers: [
+    HealthController,
+    WorkspacesController,
+    AgentsController,
+    RunsController,
+    ApprovalsController,
+    SchedulesController,
+    ConnectionsController,
+    IntegrationsController,
+    AdminController,
+  ],
+  providers: [{ provide: APP_GUARD, useClass: AuthGuard }],
+})
+export class AppModule {}

@@ -3,18 +3,23 @@
 ## Service boundaries
 
 ### `apps/web`
+
 Public Next.js 16 marketing and product UI. It has no database credentials and no browser runtime. Server-side `/backend/*` proxies authenticated product calls to the control API using the runtime `API_URL`.
 
 ### `apps/api`
+
 NestJS + Fastify control plane. Owns users/workspaces, agents, versions, approvals, schedules, integrations, connections, run creation, analytics and audit. It never launches Chromium. Browser jobs are dispatched through Cloud Tasks.
 
 ### `apps/browser-worker`
+
 Private Cloud Run execution plane with concurrency 1 initially. Owns Playwright, discovery, deterministic execution, checkpoints, challenge detection, recovery replay and version promotion. It obtains secrets by reference from Secret Manager.
 
 ### `apps/notifier`
+
 Private Pub/Sub push consumer. Converts operational events into Slack, Gmail API and Google Chat notifications.
 
 ### `apps/demo-portal`
+
 A deterministic portal used only to demonstrate and test DOM drift. V1 uses one stable locator and V2 deliberately changes it.
 
 ## Intelligence boundary
