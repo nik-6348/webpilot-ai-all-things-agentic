@@ -1,0 +1,11 @@
+import "dotenv/config";
+import { PrismaPg } from "@prisma/adapter-pg";
+import { PrismaClient } from "../generated/client.js";
+const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL! });
+const db = new PrismaClient({ adapter });
+const user = await db.user.upsert({ where:{email:"demo@webpilot.local"}, update:{}, create:{identityProviderUid:"local-demo-user",email:"demo@webpilot.local",displayName:"Demo User"} });
+const ws = await db.workspace.upsert({ where:{slug:"demo"}, update:{}, create:{name:"Demo Workspace",slug:"demo"} });
+await db.workspaceMember.upsert({where:{workspaceId_userId:{workspaceId:ws.id,userId:user.id}},update:{role:"OWNER"},create:{workspaceId:ws.id,userId:user.id,role:"OWNER"}});
+await db.workspaceSetting.upsert({where:{workspaceId:ws.id},update:{},create:{workspaceId:ws.id}});
+console.log({userId:user.id,workspaceId:ws.id});
+await db.$disconnect();

@@ -1,0 +1,253 @@
+generator client { provider = "prisma-client" output = "../generated" }
+datasource db { provider = "postgresql" }
+
+enum WorkspaceRole { OWNER ADMIN OPERATOR VIEWER }
+enum AgentStatus { ACTIVE PAUSED DISABLED ARCHIVED }
+enum VersionStatus { DRAFT PRODUCTION ARCHIVED }
+enum VersionSource { AI_DISCOVERY AI_RECOVERY USER_EDIT }
+enum ApprovalStatus { PENDING APPROVED REJECTED EXPIRED }
+
+model User {
+  id String @id @default(cuid())
+  identityProviderUid String @unique @map("identity_provider_uid")
+  email String @unique
+  displayName String? @map("display_name")
+  avatarUrl String? @map("avatar_url")
+  memberships WorkspaceMember[]
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  @@map("users")
+}
+model Workspace {
+  id String @id @default(cuid())
+  name String
+  slug String @unique
+  members WorkspaceMember[]
+  agents Agent[]
+  runs Run[]
+  approvals Approval[]
+  integrations Integration[]
+  connections Connection[]
+  schedules Schedule[]
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  @@map("workspaces")
+}
+model WorkspaceMember {
+  id String @id @default(cuid())
+  workspaceId String @map("workspace_id")
+  userId String @map("user_id")
+  role WorkspaceRole @default(OPERATOR)
+  workspace Workspace @relation(fields:[workspaceId], references:[id], onDelete:Cascade)
+  user User @relation(fields:[userId], references:[id], onDelete:Cascade)
+  @@unique([workspaceId,userId])
+  @@map("workspace_members")
+}
+model Agent {
+  id String @id @default(cuid())
+  workspaceId String @map("workspace_id")
+  name String
+  description String?
+  goal String
+  targetUrl String @map("target_url")
+  allowedDomains Json @map("allowed_domains")
+  status AgentStatus @default(ACTIVE)
+  activeVersionId String? @map("active_version_id")
+  connectionId String? @map("connection_id")
+  workspace Workspace @relation(fields:[workspaceId], references:[id], onDelete:Cascade)
+  versions AgentVersion[]
+  runs Run[]
+  schedules Schedule[]
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  rowVersion Int @default(1) @map("row_version")
+  @@index([workspaceId,createdAt])
+  @@map("agents")
+}
+model AgentVersion {
+  id String @id @default(cuid())
+  agentId String @map("agent_id")
+  label String
+  status VersionStatus @default(DRAFT)
+  source VersionSource
+  parentVersionId String? @map("parent_version_id")
+  workflowSpec Json @map("workflow_spec")
+  extractionSchema Json @map("extraction_schema")
+  compiledArtifactPath String? @map("compiled_artifact_path")
+  verification Json?
+  riskLevel String @default("LOW") @map("risk_level")
+  agent Agent @relation(fields:[agentId], references:[id], onDelete:Cascade)
+  runs Run[]
+  createdAt DateTime @default(now()) @map("created_at")
+  promotedAt DateTime? @map("promoted_at")
+  @@unique([agentId,label])
+  @@map("agent_versions")
+}
+model Run {
+  id String @id @default(cuid())
+  workspaceId String @map("workspace_id")
+  agentId String @map("agent_id")
+  versionId String? @map("version_id")
+  triggerType String @map("trigger_type")
+  status String
+  executionMode String @map("execution_mode")
+  currentStep String? @map("current_step")
+  idempotencyKey String @unique @map("idempotency_key")
+  retryCount Int @default(0) @map("retry_count")
+  recoveryCount Int @default(0) @map("recovery_count")
+  modelCallCount Int @default(0) @map("model_call_count")
+  inputTokens Int @default(0) @map("input_tokens")
+  outputTokens Int @default(0) @map("output_tokens")
+  result Json?
+  errorCode String? @map("error_code")
+  errorMessage String? @map("error_message")
+  leaseOwner String? @map("lease_owner")
+  leaseExpiresAt DateTime? @map("lease_expires_at")
+  workspace Workspace @relation(fields:[workspaceId], references:[id], onDelete:Cascade)
+  agent Agent @relation(fields:[agentId], references:[id], onDelete:Cascade)
+  version AgentVersion? @relation(fields:[versionId], references:[id])
+  events RunEvent[]
+  steps RunStep[]
+  recoveries RecoveryAttempt[]
+  approvals Approval[]
+  modelInvocations ModelInvocation[]
+  startedAt DateTime? @map("started_at")
+  completedAt DateTime? @map("completed_at")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  @@index([workspaceId,createdAt])
+  @@index([agentId,createdAt])
+  @@index([status])
+  @@map("runs")
+}
+model RunStep {
+  id String @id @default(cuid())
+  runId String @map("run_id")
+  workflowStepId String @map("workflow_step_id")
+  sequenceNumber Int @map("sequence_number")
+  actionType String @map("action_type")
+  status String
+  metadata Json?
+  run Run @relation(fields:[runId], references:[id], onDelete:Cascade)
+  createdAt DateTime @default(now()) @map("created_at")
+  @@unique([runId,workflowStepId,sequenceNumber])
+  @@map("run_steps")
+}
+model RunEvent {
+  id String @id @default(cuid())
+  runId String @map("run_id")
+  eventType String @map("event_type")
+  source String
+  message String
+  metadata Json?
+  run Run @relation(fields:[runId], references:[id], onDelete:Cascade)
+  createdAt DateTime @default(now()) @map("created_at")
+  @@index([runId,createdAt])
+  @@map("run_events")
+}
+model ModelInvocation {
+  id String @id @default(cuid())
+  runId String @map("run_id")
+  agentType String @map("agent_type")
+  model String
+  inputTokens Int @default(0) @map("input_tokens")
+  outputTokens Int @default(0) @map("output_tokens")
+  latencyMs Int @default(0) @map("latency_ms")
+  success Boolean @default(true)
+  run Run @relation(fields:[runId], references:[id], onDelete:Cascade)
+  createdAt DateTime @default(now()) @map("created_at")
+  @@map("model_invocations")
+}
+model RecoveryAttempt {
+  id String @id @default(cuid())
+  runId String @map("run_id")
+  attemptNumber Int @map("attempt_number")
+  failedStepId String @map("failed_step_id")
+  diagnosis Json
+  patch Json
+  confidence Float
+  riskLevel String @map("risk_level")
+  verification Json?
+  run Run @relation(fields:[runId], references:[id], onDelete:Cascade)
+  createdAt DateTime @default(now()) @map("created_at")
+  @@map("recovery_attempts")
+}
+model Approval {
+  id String @id @default(cuid())
+  workspaceId String @map("workspace_id")
+  runId String? @map("run_id")
+  type String
+  status ApprovalStatus @default(PENDING)
+  riskLevel String @default("LOW") @map("risk_level")
+  reason String
+  payload Json?
+  resolvedBy String? @map("resolved_by")
+  workspace Workspace @relation(fields:[workspaceId], references:[id], onDelete:Cascade)
+  run Run? @relation(fields:[runId], references:[id], onDelete:Cascade)
+  requestedAt DateTime @default(now()) @map("requested_at")
+  resolvedAt DateTime? @map("resolved_at")
+  @@index([workspaceId,status])
+  @@map("approvals")
+}
+model Schedule {
+  id String @id @default(cuid())
+  workspaceId String @map("workspace_id")
+  agentId String @map("agent_id")
+  name String
+  cronExpression String @map("cron_expression")
+  timezone String @default("UTC")
+  enabled Boolean @default(true)
+  schedulerJobName String? @map("scheduler_job_name")
+  workspace Workspace @relation(fields:[workspaceId], references:[id], onDelete:Cascade)
+  agent Agent @relation(fields:[agentId], references:[id], onDelete:Cascade)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  @@map("schedules")
+}
+model Integration {
+  id String @id @default(cuid())
+  workspaceId String @map("workspace_id")
+  provider String
+  status String
+  displayName String @map("display_name")
+  metadata Json?
+  secretManagerRef String? @map("secret_manager_ref")
+  workspace Workspace @relation(fields:[workspaceId], references:[id], onDelete:Cascade)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  @@map("integrations")
+}
+model Connection {
+  id String @id @default(cuid())
+  workspaceId String @map("workspace_id")
+  name String
+  allowedDomains Json @map("allowed_domains")
+  secretManagerRef String @map("secret_manager_ref")
+  credentialFields Json @map("credential_fields")
+  workspace Workspace @relation(fields:[workspaceId], references:[id], onDelete:Cascade)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  @@map("connections")
+}
+model AuditLog {
+  id String @id @default(cuid())
+  workspaceId String @map("workspace_id")
+  actorId String? @map("actor_id")
+  action String
+  resourceType String @map("resource_type")
+  resourceId String? @map("resource_id")
+  metadata Json?
+  createdAt DateTime @default(now()) @map("created_at")
+  @@index([workspaceId,createdAt])
+  @@map("audit_logs")
+}
+model WorkspaceSetting {
+  workspaceId String @id @map("workspace_id")
+  defaultModel String @default("gemini-3.7-flash") @map("default_model")
+  maxRunDuration Int @default(600) @map("max_run_duration")
+  maxRecoveryAttempts Int @default(3) @map("max_recovery_attempts")
+  retentionDays Int @default(30) @map("retention_days")
+  autoPromoteLowRisk Boolean @default(true) @map("auto_promote_low_risk")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  @@map("workspace_settings")
+}

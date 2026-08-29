@@ -1,0 +1,22 @@
+{
+  "name": "webpilot-ai",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.15.1",
+  "scripts": {
+    "dev": "turbo dev --parallel",
+    "build": "turbo build",
+    "typecheck": "turbo typecheck",
+    "test": "turbo test",
+    "lint": "turbo lint",
+    "db:generate": "pnpm --filter @webpilot/database generate",
+    "db:migrate": "pnpm --filter @webpilot/database migrate:deploy",
+    "db:seed": "pnpm --filter @webpilot/database seed",
+    "preflight": "node scripts/preflight.mjs",
+    "demo:e2e": "node tests/demo-e2e.mjs"
+  },
+  "devDependencies": {
+    "turbo": "2.5.6",
+    "typescript": "5.9.2"
+  }
+}
