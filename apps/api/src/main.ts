@@ -11,14 +11,15 @@ async function bootstrap() {
     AppModule,
     new FastifyAdapter({ trustProxy: true }),
   );
-  app
-    .getHttpAdapter()
-    .getInstance()
-    .addContentTypeParser(
-      "application/x-www-form-urlencoded",
-      { parseAs: "string" },
-      (_req: any, body: string, done: any) => done(null, body),
-    );
+  const instance = app.getHttpAdapter().getInstance();
+  if (typeof instance.removeContentTypeParser === "function") {
+    instance.removeContentTypeParser("application/x-www-form-urlencoded");
+  }
+  instance.addContentTypeParser(
+    "application/x-www-form-urlencoded",
+    { parseAs: "string" },
+    (_req: any, body: string, done: any) => done(null, body),
+  );
   app.setGlobalPrefix("api/v1");
   app.enableCors({
     origin: (process.env.CORS_ORIGINS || "http://localhost:3000").split(","),
