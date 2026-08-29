@@ -1,59 +1,135 @@
 substitutions:
   _REGION: us-central1
   _ENV: prod
+
 steps:
-- id: terraform-init
-  name: hashicorp/terraform:1.9
-  entrypoint: sh
-  args: ["-c","cd infra/terraform && terraform init && terraform apply -auto-approve -var=project_id=$PROJECT_ID -var=region=${_REGION} -var=environment=${_ENV}"]
-- id: build-images
-  name: gcr.io/cloud-builders/docker
-  entrypoint: bash
-  args:
-  - -ceu
-  - |
-    REPO="${_REGION}-docker.pkg.dev/$PROJECT_ID/webpilot-${_ENV}-containers"
-    docker build -f docker/api.Dockerfile -t "$REPO/api:$SHORT_SHA" .
-    docker build -f docker/worker.Dockerfile -t "$REPO/worker:$SHORT_SHA" .
-    docker build -f docker/notifier.Dockerfile -t "$REPO/notifier:$SHORT_SHA" .
-    docker build -f docker/demo.Dockerfile -t "$REPO/demo:$SHORT_SHA" .
-    cd infra/terraform
-    FIREBASE_KEY=$(terraform output -raw firebase_api_key)
-    FIREBASE_DOMAIN=$(terraform output -raw firebase_auth_domain)
-    cd ../..
-    docker build -f docker/web.Dockerfile --build-arg NEXT_PUBLIC_FIREBASE_API_KEY="$FIREBASE_KEY" --build-arg NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN="$FIREBASE_DOMAIN" --build-arg NEXT_PUBLIC_FIREBASE_PROJECT_ID="$PROJECT_ID" -t "$REPO/web:$SHORT_SHA" .
-    for I in api worker notifier demo web; do docker push "$REPO/$I:$SHORT_SHA"; done
-- id: deploy
-  name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
-  entrypoint: bash
-  args:
-  - -ceu
-  - |
-    REPO="${_REGION}-docker.pkg.dev/$PROJECT_ID/webpilot-${_ENV}-containers"
-    TF="infra/terraform"
-    SQL=$(terraform -chdir=$TF output -raw cloud_sql_connection_name)
-    DB_SECRET=$(terraform -chdir=$TF output -raw database_secret)
-    WORKER_SA=$(terraform -chdir=$TF output -raw worker_service_account)
-    API_SA=$(terraform -chdir=$TF output -raw api_service_account)
-    NOTIFIER_SA=$(terraform -chdir=$TF output -raw notifier_service_account)
-    WEB_SA=$(terraform -chdir=$TF output -raw web_service_account)
-    TASK_SA=$(terraform -chdir=$TF output -raw task_invoker_service_account)
-    SCHED_SA=$(terraform -chdir=$TF output -raw scheduler_invoker_service_account)
-    BUCKET=$(terraform -chdir=$TF output -raw artifact_bucket)
-    gcloud run deploy webpilot-${_ENV}-worker --image "$REPO/worker:$SHORT_SHA" --region ${_REGION} --service-account "$WORKER_SA" --no-allow-unauthenticated --add-cloudsql-instances "$SQL" --set-secrets DATABASE_URL="$DB_SECRET:latest" --set-env-vars GOOGLE_CLOUD_PROJECT=$PROJECT_ID,GOOGLE_CLOUD_LOCATION=global,GOOGLE_GENAI_USE_VERTEXAI=true,GEMINI_MODEL=gemini-3.7-flash,ARTIFACT_BUCKET=$BUCKET,LOCAL_TASKS=false,LOCAL_ARTIFACTS=false,LOCAL_SECRETS=false,LOCAL_PUBSUB=false --concurrency=1 --memory=2Gi --cpu=2 --timeout=900
-    WORKER_URL=$(gcloud run services describe webpilot-${_ENV}-worker --region ${_REGION} --format='value(status.url)')
-    gcloud run services add-iam-policy-binding webpilot-${_ENV}-worker --region ${_REGION} --member="serviceAccount:$TASK_SA" --role=roles/run.invoker
-    gcloud run deploy webpilot-${_ENV}-api --image "$REPO/api:$SHORT_SHA" --region ${_REGION} --service-account "$API_SA" --allow-unauthenticated --add-cloudsql-instances "$SQL" --set-secrets DATABASE_URL="$DB_SECRET:latest" --set-env-vars GOOGLE_CLOUD_PROJECT=$PROJECT_ID,FIREBASE_PROJECT_ID=$PROJECT_ID,WORKER_URL=$WORKER_URL,TASK_QUEUE=webpilot-${_ENV}-runs,TASK_LOCATION=${_REGION},TASK_INVOKER_SA=$TASK_SA,SCHEDULER_INVOKER_SA=$SCHED_SA,LOCAL_TASKS=false,LOCAL_SECRETS=false,LOCAL_SCHEDULER=false,LOCAL_PUBSUB=false
-    API_URL=$(gcloud run services describe webpilot-${_ENV}-api --region ${_REGION} --format='value(status.url)')
-    gcloud run services update webpilot-${_ENV}-api --region ${_REGION} --update-env-vars API_PUBLIC_URL=$API_URL,SCHEDULER_AUDIENCE=$API_URL
-    gcloud run deploy webpilot-${_ENV}-notifier --image "$REPO/notifier:$SHORT_SHA" --region ${_REGION} --service-account "$NOTIFIER_SA" --no-allow-unauthenticated --add-cloudsql-instances "$SQL" --set-secrets DATABASE_URL="$DB_SECRET:latest" --set-env-vars GOOGLE_CLOUD_PROJECT=$PROJECT_ID,LOCAL_SECRETS=false
-    NOTIFIER_URL=$(gcloud run services describe webpilot-${_ENV}-notifier --region ${_REGION} --format='value(status.url)')
-    gcloud run deploy webpilot-${_ENV}-demo --image "$REPO/demo:$SHORT_SHA" --region ${_REGION} --allow-unauthenticated
-    gcloud run deploy webpilot-${_ENV}-web --image "$REPO/web:$SHORT_SHA" --region ${_REGION} --service-account "$WEB_SA" --allow-unauthenticated --set-env-vars API_URL=$API_URL
-    gcloud pubsub subscriptions describe webpilot-${_ENV}-notifier >/dev/null 2>&1 || gcloud pubsub subscriptions create webpilot-${_ENV}-notifier --topic=webpilot-${_ENV}-events --push-endpoint="$NOTIFIER_URL/internal/events"
-    # Database schema migration. The API image contains Prisma and migration files.
-    gcloud run jobs describe webpilot-${_ENV}-migrate --region ${_REGION} >/dev/null 2>&1 || gcloud run jobs create webpilot-${_ENV}-migrate --image "$REPO/api:$SHORT_SHA" --region ${_REGION} --service-account "$API_SA" --set-cloudsql-instances "$SQL" --set-secrets DATABASE_URL="$DB_SECRET:latest",DIRECT_URL="$DB_SECRET:latest" --command=pnpm --args=--filter,@webpilot/database,migrate:deploy
-    gcloud run jobs update webpilot-${_ENV}-migrate --image "$REPO/api:$SHORT_SHA" --region ${_REGION}
-    gcloud run jobs execute webpilot-${_ENV}-migrate --region ${_REGION} --wait
+  - id: terraform-init
+    name: hashicorp/terraform:1.9
+    entrypoint: sh
+    args:
+      - -c
+      - >-
+        cd infra/terraform &&
+        terraform init &&
+        terraform apply -auto-approve
+        -var=project_id=$PROJECT_ID
+        -var=region=${_REGION}
+        -var=environment=${_ENV}
+
+  - id: build-images
+    name: gcr.io/cloud-builders/docker
+    entrypoint: bash
+    args:
+      - -ceu
+      - |
+        REPO="${_REGION}-docker.pkg.dev/$PROJECT_ID/webpilot-${_ENV}-containers"
+        docker build -f docker/api.Dockerfile -t "$REPO/api:$SHORT_SHA" .
+        docker build -f docker/worker.Dockerfile -t "$REPO/worker:$SHORT_SHA" .
+        docker build -f docker/notifier.Dockerfile -t "$REPO/notifier:$SHORT_SHA" .
+        docker build -f docker/demo.Dockerfile -t "$REPO/demo:$SHORT_SHA" .
+
+        FIREBASE_KEY=$(terraform -chdir=infra/terraform output -raw firebase_api_key)
+        FIREBASE_DOMAIN=$(terraform -chdir=infra/terraform output -raw firebase_auth_domain)
+        docker build -f docker/web.Dockerfile \
+          --build-arg NEXT_PUBLIC_FIREBASE_API_KEY="$FIREBASE_KEY" \
+          --build-arg NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN="$FIREBASE_DOMAIN" \
+          --build-arg NEXT_PUBLIC_FIREBASE_PROJECT_ID="$PROJECT_ID" \
+          -t "$REPO/web:$SHORT_SHA" .
+
+        for image in api worker notifier demo web; do
+          docker push "$REPO/$image:$SHORT_SHA"
+        done
+
+  - id: deploy
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
+    entrypoint: bash
+    args:
+      - -ceu
+      - |
+        REPO="${_REGION}-docker.pkg.dev/$PROJECT_ID/webpilot-${_ENV}-containers"
+        TF="infra/terraform"
+        SQL=$(terraform -chdir=$TF output -raw cloud_sql_connection_name)
+        DB_SECRET=$(terraform -chdir=$TF output -raw database_secret)
+        WORKER_SA=$(terraform -chdir=$TF output -raw worker_service_account)
+        API_SA=$(terraform -chdir=$TF output -raw api_service_account)
+        NOTIFIER_SA=$(terraform -chdir=$TF output -raw notifier_service_account)
+        WEB_SA=$(terraform -chdir=$TF output -raw web_service_account)
+        TASK_SA=$(terraform -chdir=$TF output -raw task_invoker_service_account)
+        SCHED_SA=$(terraform -chdir=$TF output -raw scheduler_invoker_service_account)
+        PUBSUB_SA=$(terraform -chdir=$TF output -raw pubsub_invoker_service_account)
+        BUCKET=$(terraform -chdir=$TF output -raw artifact_bucket)
+        TOPIC="webpilot-${_ENV}-events"
+
+        # Apply schema before public application services receive traffic.
+        if gcloud run jobs describe webpilot-${_ENV}-migrate --region ${_REGION} >/dev/null 2>&1; then
+          gcloud run jobs update webpilot-${_ENV}-migrate \
+            --image "$REPO/api:$SHORT_SHA" --region ${_REGION} \
+            --service-account "$API_SA" --set-cloudsql-instances "$SQL" \
+            --set-secrets DATABASE_URL="$DB_SECRET:latest",DIRECT_URL="$DB_SECRET:latest" \
+            --command=pnpm --args=--filter,@webpilot/database,migrate:deploy
+        else
+          gcloud run jobs create webpilot-${_ENV}-migrate \
+            --image "$REPO/api:$SHORT_SHA" --region ${_REGION} \
+            --service-account "$API_SA" --set-cloudsql-instances "$SQL" \
+            --set-secrets DATABASE_URL="$DB_SECRET:latest",DIRECT_URL="$DB_SECRET:latest" \
+            --command=pnpm --args=--filter,@webpilot/database,migrate:deploy
+        fi
+        gcloud run jobs execute webpilot-${_ENV}-migrate --region ${_REGION} --wait
+
+        gcloud run deploy webpilot-${_ENV}-worker \
+          --image "$REPO/worker:$SHORT_SHA" --region ${_REGION} \
+          --service-account "$WORKER_SA" --no-allow-unauthenticated \
+          --add-cloudsql-instances "$SQL" \
+          --set-secrets DATABASE_URL="$DB_SECRET:latest" \
+          --set-env-vars GOOGLE_CLOUD_PROJECT=$PROJECT_ID,GOOGLE_CLOUD_LOCATION=global,GOOGLE_GENAI_USE_VERTEXAI=true,GEMINI_MODEL=gemini-3.7-flash,ARTIFACT_BUCKET=$BUCKET,PUBSUB_TOPIC=$TOPIC,LOCAL_ARTIFACTS=false,LOCAL_SECRETS=false,LOCAL_PUBSUB=false,ALLOW_PRIVATE_DEMO=false \
+          --concurrency=1 --memory=2Gi --cpu=2 --timeout=900
+        WORKER_URL=$(gcloud run services describe webpilot-${_ENV}-worker --region ${_REGION} --format='value(status.url)')
+        gcloud run services add-iam-policy-binding webpilot-${_ENV}-worker \
+          --region ${_REGION} --member="serviceAccount:$TASK_SA" --role=roles/run.invoker
+
+        gcloud run deploy webpilot-${_ENV}-api \
+          --image "$REPO/api:$SHORT_SHA" --region ${_REGION} \
+          --service-account "$API_SA" --allow-unauthenticated \
+          --add-cloudsql-instances "$SQL" \
+          --set-secrets DATABASE_URL="$DB_SECRET:latest" \
+          --set-env-vars GOOGLE_CLOUD_PROJECT=$PROJECT_ID,FIREBASE_PROJECT_ID=$PROJECT_ID,WORKER_URL=$WORKER_URL,WORKER_AUDIENCE=$WORKER_URL,TASK_QUEUE=webpilot-${_ENV}-runs,TASK_LOCATION=${_REGION},TASK_INVOKER_SA=$TASK_SA,SCHEDULER_INVOKER_SA=$SCHED_SA,LOCAL_TASKS=false,LOCAL_SECRETS=false,LOCAL_SCHEDULER=false,LOCAL_PUBSUB=false
+        API_URL=$(gcloud run services describe webpilot-${_ENV}-api --region ${_REGION} --format='value(status.url)')
+        gcloud run services update webpilot-${_ENV}-api --region ${_REGION} \
+          --update-env-vars API_PUBLIC_URL=$API_URL,SCHEDULER_AUDIENCE=$API_URL
+
+        gcloud run deploy webpilot-${_ENV}-notifier \
+          --image "$REPO/notifier:$SHORT_SHA" --region ${_REGION} \
+          --service-account "$NOTIFIER_SA" --no-allow-unauthenticated \
+          --add-cloudsql-instances "$SQL" \
+          --set-secrets DATABASE_URL="$DB_SECRET:latest" \
+          --set-env-vars GOOGLE_CLOUD_PROJECT=$PROJECT_ID,LOCAL_SECRETS=false
+        NOTIFIER_URL=$(gcloud run services describe webpilot-${_ENV}-notifier --region ${_REGION} --format='value(status.url)')
+        gcloud run services add-iam-policy-binding webpilot-${_ENV}-notifier \
+          --region ${_REGION} --member="serviceAccount:$PUBSUB_SA" --role=roles/run.invoker
+
+        SUB="webpilot-${_ENV}-notifier"
+        if gcloud pubsub subscriptions describe "$SUB" >/dev/null 2>&1; then
+          gcloud pubsub subscriptions update "$SUB" \
+            --push-endpoint="$NOTIFIER_URL/internal/events" \
+            --push-auth-service-account="$PUBSUB_SA" \
+            --push-auth-token-audience="$NOTIFIER_URL"
+        else
+          gcloud pubsub subscriptions create "$SUB" --topic="$TOPIC" \
+            --push-endpoint="$NOTIFIER_URL/internal/events" \
+            --push-auth-service-account="$PUBSUB_SA" \
+            --push-auth-token-audience="$NOTIFIER_URL"
+        fi
+
+        gcloud run deploy webpilot-${_ENV}-demo \
+          --image "$REPO/demo:$SHORT_SHA" --region ${_REGION} --allow-unauthenticated
+
+        gcloud run deploy webpilot-${_ENV}-web \
+          --image "$REPO/web:$SHORT_SHA" --region ${_REGION} \
+          --service-account "$WEB_SA" --allow-unauthenticated \
+          --set-env-vars API_URL=$API_URL
+        WEB_URL=$(gcloud run services describe webpilot-${_ENV}-web --region ${_REGION} --format='value(status.url)')
+        gcloud run services update webpilot-${_ENV}-api --region ${_REGION} \
+          --update-env-vars CORS_ORIGINS=$WEB_URL
+
 options:
   logging: CLOUD_LOGGING_ONLY

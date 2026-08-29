@@ -1,16 +1,37 @@
 services:
   postgres:
     image: postgres:17
-    environment: { POSTGRES_USER: webpilot, POSTGRES_PASSWORD: webpilot, POSTGRES_DB: webpilot }
-    healthcheck: { test: ["CMD-SHELL","pg_isready -U webpilot"], interval: 3s, timeout: 3s, retries: 20 }
+    environment:
+      POSTGRES_USER: webpilot
+      POSTGRES_PASSWORD: webpilot
+      POSTGRES_DB: webpilot
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U webpilot"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
     ports: ["5432:5432"]
     volumes: ["pgdata:/var/lib/postgresql/data"]
+
   demo-portal:
     build: { context: ., dockerfile: docker/demo.Dockerfile }
     ports: ["4200:4200"]
+
+  migrate:
+    build: { context: ., dockerfile: docker/api.Dockerfile }
+    depends_on:
+      postgres: { condition: service_healthy }
+    environment:
+      DATABASE_URL: postgresql://webpilot:webpilot@postgres:5432/webpilot
+      DIRECT_URL: postgresql://webpilot:webpilot@postgres:5432/webpilot
+    command: ["pnpm", "--filter", "@webpilot/database", "migrate:deploy"]
+    restart: "no"
+
   browser-worker:
     build: { context: ., dockerfile: docker/worker.Dockerfile }
-    depends_on: { postgres: { condition: service_healthy }, demo-portal: { condition: service_started } }
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      demo-portal: { condition: service_started }
     environment: &common
       DATABASE_URL: postgresql://webpilot:webpilot@postgres:5432/webpilot
       DIRECT_URL: postgresql://webpilot:webpilot@postgres:5432/webpilot
@@ -23,30 +44,57 @@ services:
       MOCK_AI: "true"
       GEMINI_MODEL: gemini-3.7-flash
       INTERNAL_WORKER_TOKEN: dev-worker-token
-      LOCAL_DATA_DIR: /tmp/webpilot
+      LOCAL_DATA_DIR: /shared
+      PUBSUB_TOPIC: webpilot-events
     ports: ["4100:4100"]
+    volumes: ["localdata:/shared"]
+
   api:
     build: { context: ., dockerfile: docker/api.Dockerfile }
-    depends_on: { postgres: { condition: service_healthy }, browser-worker: { condition: service_started } }
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      browser-worker: { condition: service_started }
     environment:
       <<: *common
       PORT: 4000
       LOCAL_AUTH_BYPASS: "true"
       LOCAL_USER_EMAIL: demo@webpilot.local
       WORKER_URL: http://browser-worker:4100
+      WORKER_AUDIENCE: http://browser-worker:4100
       API_PUBLIC_URL: http://localhost:4000
       CORS_ORIGINS: http://localhost:3000
+      SCHEDULER_AUDIENCE: http://localhost:4000
+      GMAIL_SENDER: ""
+      GMAIL_OAUTH_SECRET_REF: ""
+      GOOGLE_CHAT_WEBHOOK: ""
     ports: ["4000:4000"]
+    volumes: ["localdata:/shared"]
+
   notifier:
     build: { context: ., dockerfile: docker/notifier.Dockerfile }
-    depends_on: { postgres: { condition: service_healthy } }
-    environment: { <<: *common, PORT: 4300 }
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+    environment:
+      <<: *common
+      PORT: 4300
+      GMAIL_SENDER: ""
+      GMAIL_OAUTH_SECRET_REF: ""
+      GOOGLE_CHAT_WEBHOOK: ""
     ports: ["4300:4300"]
+    volumes: ["localdata:/shared"]
+
   web:
-    build: { context: ., dockerfile: docker/web.Dockerfile }
+    build:
+      context: .
+      dockerfile: docker/web.Dockerfile
+      args:
+        NEXT_PUBLIC_LOCAL_AUTH_BYPASS: "true"
     depends_on: [api]
     environment:
       API_URL: http://api:4000
       NEXT_PUBLIC_LOCAL_AUTH_BYPASS: "true"
     ports: ["3000:3000"]
-volumes: { pgdata: {} }
+
+volumes:
+  pgdata: {}
+  localdata: {}

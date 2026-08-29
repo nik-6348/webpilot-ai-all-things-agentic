@@ -35,3 +35,16 @@ resource "google_firebase_web_app" "web" { provider=google project=var.project_i
 data "google_firebase_web_app_config" "web" { provider=google web_app_id=google_firebase_web_app.web.app_id depends_on=[google_firebase_web_app.web] }
 resource "google_identity_platform_config" "auth" { project=var.project_id autodelete_anonymous_users=true sign_in { email { enabled=false password_required=false } anonymous { enabled=false } } depends_on=[google_project_service.apis] }
 resource "google_identity_platform_default_supported_idp_config" "google" { count=var.google_oauth_client_id!=""&&var.google_oauth_client_secret!=""?1:0 project=var.project_id enabled=true idp_id="google.com" client_id=var.google_oauth_client_id client_secret=var.google_oauth_client_secret depends_on=[google_identity_platform_config.auth] }
+
+resource "google_project_service_identity" "pubsub" {
+  provider = google-beta
+  project  = var.project_id
+  service  = "pubsub.googleapis.com"
+  depends_on = [google_project_service.apis]
+}
+
+resource "google_service_account_iam_member" "pubsub_mint_token" {
+  service_account_id = google_service_account.pubsub_invoker.name
+  role               = "roles/iam.serviceAccountTokenCreator"
+  member             = "serviceAccount:${google_project_service_identity.pubsub.email}"
+}

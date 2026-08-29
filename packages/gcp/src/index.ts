@@ -21,7 +21,7 @@ export class TaskQueue {
     if (process.env.LOCAL_TASKS === "true") { const r=await fetch(`${process.env.WORKER_URL}/internal/runs/${runId}/execute`,{method:"POST",headers:{"x-internal-token":process.env.INTERNAL_WORKER_TOKEN||""}}); if(!r.ok) throw new Error(await r.text()); return; }
     const project=process.env.GOOGLE_CLOUD_PROJECT!, location=process.env.TASK_LOCATION||"us-central1", queue=process.env.TASK_QUEUE||"webpilot-runs";
     const parent=this.client.queuePath(project,location,queue); const url=`${process.env.WORKER_URL}/internal/runs/${runId}/execute`;
-    await this.client.createTask({parent,task:{httpRequest:{httpMethod:"POST",url,oidcToken:{serviceAccountEmail:process.env.TASK_INVOKER_SA},headers:{"Content-Type":"application/json"}}}});
+    await this.client.createTask({parent,task:{httpRequest:{httpMethod:"POST",url,oidcToken:{serviceAccountEmail:process.env.TASK_INVOKER_SA,audience:process.env.WORKER_AUDIENCE||new URL(process.env.WORKER_URL!).origin},headers:{"Content-Type":"application/json"}}}});
   }
 }
 export class EventBus { private pubsub=new PubSub(); async publish(topic:string,payload:unknown){ if(process.env.LOCAL_PUBSUB==="true") return; await this.pubsub.topic(topic).publishMessage({json:payload}); } }
@@ -32,5 +32,6 @@ export class SecretVault {
 }
 export class SchedulerService {
   private client=new CloudSchedulerClient();
-  async upsert(id:string,cron:string,timezone:string,targetUrl:string){ if(process.env.LOCAL_SCHEDULER==="true") return `local:${id}`; const project=process.env.GOOGLE_CLOUD_PROJECT!,location=process.env.TASK_LOCATION||"us-central1"; const parent=this.client.locationPath(project,location); const name=`${parent}/jobs/${id}`; const job={name,schedule:cron,timeZone:timezone,httpTarget:{uri:targetUrl,httpMethod:"POST" as const,oidcToken:{serviceAccountEmail:process.env.SCHEDULER_INVOKER_SA}}}; try{await this.client.getJob({name}); await this.client.updateJob({job});}catch{await this.client.createJob({parent,job});} return name; }
+  async upsert(id:string,cron:string,timezone:string,targetUrl:string){ if(process.env.LOCAL_SCHEDULER==="true") return `local:${id}`; const project=process.env.GOOGLE_CLOUD_PROJECT!,location=process.env.TASK_LOCATION||"us-central1"; const parent=this.client.locationPath(project,location); const name=`${parent}/jobs/${id}`; const job={name,schedule:cron,timeZone:timezone,httpTarget:{uri:targetUrl,httpMethod:"POST" as const,oidcToken:{serviceAccountEmail:process.env.SCHEDULER_INVOKER_SA,audience:process.env.SCHEDULER_AUDIENCE||new URL(targetUrl).origin}}}; try{await this.client.getJob({name}); await this.client.updateJob({job});}catch{await this.client.createJob({parent,job});} return name; }
+  async remove(name:string){ if(process.env.LOCAL_SCHEDULER==="true"||name.startsWith("local:")) return; await this.client.deleteJob({name}).catch((e:any)=>{ if(e?.code!==5) throw e; }); }
 }
