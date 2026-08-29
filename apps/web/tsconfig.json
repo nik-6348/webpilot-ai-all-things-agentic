@@ -1,0 +1,1 @@
+{"extends":"../../tsconfig.base.json","compilerOptions":{"jsx":"react-jsx","noEmit":true,"plugins":[{"name":"next"}],"allowJs":false,"incremental":true,"module":"ESNext","moduleResolution":"Bundler"},"include":["next-env.d.ts","src/**/*.ts","src/**/*.tsx",".next/types/**/*.ts"]}
