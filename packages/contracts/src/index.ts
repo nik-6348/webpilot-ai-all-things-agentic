@@ -13,8 +13,10 @@ export const ExtractionFieldSchema = z.object({
   type: z.enum(["string", "number", "boolean", "date", "url", "array"]),
   required: z.boolean().default(false),
   description: z.string().optional(),
+  locator: LocatorSchema.optional(),
+  attribute: z.string().optional(),
 });
-export const ExtractionSchemaSchema = z.object({ fields: z.array(ExtractionFieldSchema).min(1) });
+export const ExtractionSchemaSchema = z.object({ recordLocator: LocatorSchema.optional(), fields: z.array(ExtractionFieldSchema).min(1) });
 export type ExtractionSchema = z.infer<typeof ExtractionSchemaSchema>;
 
 export const WorkflowStepSchema = z.object({
