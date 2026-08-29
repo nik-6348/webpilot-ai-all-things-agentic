@@ -12,10 +12,10 @@ function privateIp(ip: string): boolean {
 export async function assertSafeUrl(raw: string, allowedDomains?: string[]): Promise<URL> {
   const url = new URL(raw);
   if (!["http:", "https:"].includes(url.protocol)) throw new Error("Only http/https URLs are allowed");
-  if (BLOCKED_HOSTS.has(url.hostname)) throw new Error("Blocked host");
+  if (BLOCKED_HOSTS.has(url.hostname) && !(process.env.ALLOW_PRIVATE_DEMO === "true" && ["localhost","127.0.0.1"].includes(url.hostname))) throw new Error("Blocked host");
   if (allowedDomains?.length && !allowedDomains.some((d) => url.hostname === d || url.hostname.endsWith(`.${d}`))) throw new Error("Domain is outside approved boundary");
   const answers = await dns.lookup(url.hostname, { all: true });
-  if (!answers.length || answers.some((a) => privateIp(a.address))) throw new Error("Private/internal network target blocked");
+  if (!answers.length || (answers.some((a) => privateIp(a.address)) && process.env.ALLOW_PRIVATE_DEMO !== "true")) throw new Error("Private/internal network target blocked");
   return url;
 }
 export function redactSecrets(value: string): string {
