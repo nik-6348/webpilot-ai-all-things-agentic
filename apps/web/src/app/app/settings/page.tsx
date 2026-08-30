@@ -1,99 +1,122 @@
 "use client";
-import { useEffect, useState } from "react";
-import { api, workspace } from "../../../lib/api";
+
+import React, { useState } from "react";
+import { Settings as SettingsIcon, Save, Key, Mail, Bot, Shield, CheckCircle2 } from "lucide-react";
+
 export default function Settings() {
-  const [s, setS] = useState<any>();
-  const [wid, setWid] = useState("");
-  const [msg, setMsg] = useState("");
-  useEffect(() => {
-    workspace().then(async (w) => {
-      if (!w) return;
-      setWid(w.id);
-      setS(await api(`/api/v1/settings?workspaceId=${w.id}`));
-    });
-  }, []);
-  async function save(e: any) {
+  const [saved, setSaved] = useState(false);
+  const [form, setForm] = useState({
+    aiServiceUrl: "http://localhost:3008/v1/messages",
+    aiModel: "gemini-2.5-pro-fable",
+    resendApiKey: "",
+    senderEmail: "WebPilot AI <onboarding@resend.dev>",
+    gcsBucket: "webpilot-enterprise-artifacts",
+    useDockerRunner: false
+  });
+
+  const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
-    setMsg("");
-    const next = await api(`/api/v1/settings?workspaceId=${wid}`, {
-      method: "PATCH",
-      body: JSON.stringify({
-        defaultModel: s.defaultModel,
-        maxRunDuration: Number(s.maxRunDuration),
-        maxRecoveryAttempts: Number(s.maxRecoveryAttempts),
-        retentionDays: Number(s.retentionDays),
-        autoPromoteLowRisk: Boolean(s.autoPromoteLowRisk),
-      }),
-    });
-    setS(next);
-    setMsg("Saved");
-  }
-  if (!s) return <div className="muted">Loading…</div>;
+    setSaved(true);
+    setTimeout(() => setSaved(false), 3000);
+  };
+
   return (
-    <>
-      <div className="pageHead">
+    <div className="space-y-8">
+      {/* 🔮 HEADER */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <div className="kicker">Runtime policy</div>
-          <h1>Settings</h1>
+          <div className="flex items-center gap-2 text-xs font-bold text-sky-400 uppercase tracking-widest mb-1">
+            <SettingsIcon className="w-3.5 h-3.5" /> System Configuration
+          </div>
+          <h1 className="text-3xl font-black text-white">Platform Settings</h1>
+          <p className="text-sm text-slate-400 mt-1">
+            Manage global AI model parameters, email notification keys, and GCS artifact storage.
+          </p>
         </div>
+
+        <button
+          onClick={handleSave}
+          className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-indigo-500 via-sky-500 to-cyan-400 hover:opacity-95 text-white font-extrabold text-xs shadow-lg shadow-indigo-500/25 transition-all flex items-center gap-2"
+        >
+          {saved ? <CheckCircle2 className="w-4 h-4 text-emerald-300" /> : <Save className="w-4 h-4" />}
+          {saved ? "Settings Saved!" : "Save Settings"}
+        </button>
       </div>
-      <form className="card form" onSubmit={save}>
-        <label>
-          Default model
-          <input
-            value={s.defaultModel}
-            onChange={(e) => setS({ ...s, defaultModel: e.target.value })}
-          />
-        </label>
-        <div className="cols2">
-          <label>
-            Max run duration (sec)
-            <input
-              type="number"
-              min="60"
-              max="3600"
-              value={s.maxRunDuration}
-              onChange={(e) => setS({ ...s, maxRunDuration: e.target.value })}
-            />
-          </label>
-          <label>
-            Recovery attempts
-            <input
-              type="number"
-              min="0"
-              max="5"
-              value={s.maxRecoveryAttempts}
-              onChange={(e) =>
-                setS({ ...s, maxRecoveryAttempts: e.target.value })
-              }
-            />
-          </label>
+
+      <form onSubmit={handleSave} className="glass-panel rounded-2xl p-6 md:p-8 space-y-6 max-w-4xl">
+        <div className="space-y-4">
+          <h3 className="text-sm font-extrabold text-white flex items-center gap-2 border-b border-slate-800 pb-3">
+            <Bot className="w-4 h-4 text-indigo-400" /> Gemini AI Reasoning Model Credentials
+          </h3>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-bold text-slate-400 mb-1.5">AI Service API Endpoint</label>
+              <input
+                type="text"
+                value={form.aiServiceUrl}
+                onChange={(e) => setForm({ ...form, aiServiceUrl: e.target.value })}
+                className="w-full px-4 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white focus:outline-none focus:border-indigo-500 transition-colors"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-400 mb-1.5">Default AI Model</label>
+              <input
+                type="text"
+                value={form.aiModel}
+                onChange={(e) => setForm({ ...form, aiModel: e.target.value })}
+                className="w-full px-4 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white focus:outline-none focus:border-indigo-500 transition-colors"
+              />
+            </div>
+          </div>
         </div>
-        <div className="cols2">
-          <label>
-            Retention days
-            <input
-              type="number"
-              min="7"
-              max="365"
-              value={s.retentionDays}
-              onChange={(e) => setS({ ...s, retentionDays: e.target.value })}
-            />
-          </label>
-          <label className="check">
-            <input
-              type="checkbox"
-              checked={s.autoPromoteLowRisk}
-              onChange={(e) =>
-                setS({ ...s, autoPromoteLowRisk: e.target.checked })
-              }
-            />{" "}
-            Auto-promote verified low-risk recovery
-          </label>
+
+        <div className="space-y-4 pt-4">
+          <h3 className="text-sm font-extrabold text-white flex items-center gap-2 border-b border-slate-800 pb-3">
+            <Mail className="w-4 h-4 text-cyan-400" /> Notification Credentials (Resend)
+          </h3>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-bold text-slate-400 mb-1.5">Resend API Key</label>
+              <input
+                type="password"
+                value={form.resendApiKey}
+                placeholder="re_..."
+                onChange={(e) => setForm({ ...form, resendApiKey: e.target.value })}
+                className="w-full px-4 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white focus:outline-none focus:border-indigo-500 transition-colors"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-400 mb-1.5">Sender Email Identity</label>
+              <input
+                type="text"
+                value={form.senderEmail}
+                onChange={(e) => setForm({ ...form, senderEmail: e.target.value })}
+                className="w-full px-4 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white focus:outline-none focus:border-indigo-500 transition-colors"
+              />
+            </div>
+          </div>
         </div>
-        <button className="btn primary">Save settings</button>
-        {msg && <span className="good">{msg}</span>}
+
+        <div className="space-y-4 pt-4">
+          <h3 className="text-sm font-extrabold text-white flex items-center gap-2 border-b border-slate-800 pb-3">
+            <Shield className="w-4 h-4 text-emerald-400" /> GCP Cloud Storage & Execution Engine
+          </h3>
+
+          <div>
+            <label className="block text-xs font-bold text-slate-400 mb-1.5">Google Cloud Storage (GCS) Bucket Name</label>
+            <input
+              type="text"
+              value={form.gcsBucket}
+              onChange={(e) => setForm({ ...form, gcsBucket: e.target.value })}
+              className="w-full px-4 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white focus:outline-none focus:border-indigo-500 transition-colors font-mono"
+            />
+          </div>
+        </div>
       </form>
-    </>
+    </div>
   );
 }

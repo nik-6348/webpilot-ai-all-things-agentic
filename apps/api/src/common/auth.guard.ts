@@ -17,7 +17,10 @@ if (!getApps().length && process.env.LOCAL_AUTH_BYPASS !== "true")
   });
 @Injectable()
 export class AuthGuard implements CanActivate {
-  constructor(private reflector: Reflector) {}
+  private reflector: Reflector;
+  constructor(reflector?: Reflector) {
+    this.reflector = reflector || new Reflector();
+  }
   async canActivate(ctx: ExecutionContext) {
     if (
       this.reflector.getAllAndOverride<boolean>(PUBLIC_KEY, [

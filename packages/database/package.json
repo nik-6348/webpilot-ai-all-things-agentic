@@ -9,7 +9,7 @@
     "migrate:dev": "prisma migrate dev",
     "migrate:deploy": "prisma migrate deploy",
     "seed": "tsx prisma/seed.ts",
-    "build": "prisma generate && tsc -p tsconfig.json",
+    "build": "prisma generate && tsc -p tsconfig.json && node -e \"fs.cpSync('generated','dist/generated',{recursive:true})\"",
     "typecheck": "prisma generate && tsc -p tsconfig.json --noEmit",
     "test": "node --test",
     "lint": "tsc -p tsconfig.json --noEmit"
@@ -17,6 +17,7 @@
   "dependencies": {
     "@prisma/adapter-pg": "7.10.0",
     "@prisma/client": "7.10.0",
+    "@prisma/client-runtime-utils": "7.10.0",
     "pg": "8.16.3"
   },
   "devDependencies": {

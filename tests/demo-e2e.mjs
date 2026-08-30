@@ -1,10 +1,13 @@
 const API = process.env.API_BASE || "http://localhost:4000/api/v1";
 const DEMO = process.env.DEMO_BASE || "http://localhost:4200";
+const WORKER_TARGET_URL = process.env.WORKER_TARGET_URL || "http://demo-portal:4200";
+const WORKER_ALLOWED_DOMAIN = process.env.WORKER_ALLOWED_DOMAIN || "demo-portal";
 const j = async (url, init = {}) => {
-  const r = await fetch(url, {
-    ...init,
-    headers: { "Content-Type": "application/json", ...(init.headers || {}) },
-  });
+  const headers = { ...(init.headers || {}) };
+  if (init.body && !headers["Content-Type"]) {
+    headers["Content-Type"] = "application/json";
+  }
+  const r = await fetch(url, { ...init, headers });
   if (!r.ok) throw new Error(`${r.status} ${await r.text()}`);
   return r.json();
 };
@@ -38,8 +41,8 @@ const created = await j(`${API}/agents`, {
     workspaceId: ws.id,
     name: `Supplier Monitor ${Date.now()}`,
     goal: "Open purchase orders and extract ID, supplier, status, ETA and amount.",
-    targetUrl: "http://demo-portal:4200",
-    allowedDomains: ["demo-portal"],
+    targetUrl: WORKER_TARGET_URL,
+    allowedDomains: [WORKER_ALLOWED_DOMAIN],
     requirePlanApproval: true,
   }),
 });

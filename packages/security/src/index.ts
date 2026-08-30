@@ -33,7 +33,7 @@ export async function assertSafeUrl(
     BLOCKED_HOSTS.has(url.hostname) &&
     !(
       process.env.ALLOW_PRIVATE_DEMO === "true" &&
-      ["localhost", "127.0.0.1"].includes(url.hostname)
+      ["localhost", "127.0.0.1", "demo-portal"].includes(url.hostname)
     )
   )
     throw new Error("Blocked host");
@@ -44,9 +44,9 @@ export async function assertSafeUrl(
     )
   )
     throw new Error("Domain is outside approved boundary");
-  const answers = await dns.lookup(url.hostname, { all: true });
+  const answers = await dns.lookup(url.hostname, { all: true }).catch(() => []);
   if (
-    !answers.length ||
+    (!answers.length && !(process.env.ALLOW_PRIVATE_DEMO === "true" && url.hostname === "demo-portal")) ||
     (answers.some((a) => privateIp(a.address)) &&
       process.env.ALLOW_PRIVATE_DEMO !== "true")
   )

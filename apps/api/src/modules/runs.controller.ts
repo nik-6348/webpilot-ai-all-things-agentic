@@ -3,12 +3,15 @@ import { prisma } from "@webpilot/database";
 import { TaskQueue } from "@webpilot/gcp";
 import { requireWorkspace, audit } from "../common/context.js";
 import { z } from "zod";
+
 const Start = z.object({
   agentId: z.string(),
   triggerType: z
     .enum(["MANUAL", "API", "SLACK", "EMAIL", "SCHEDULE"])
     .default("MANUAL"),
+  forceLiveAi: z.boolean().optional(),
 });
+
 @Controller("runs")
 export class RunsController {
   @Get() async list(
@@ -23,6 +26,7 @@ export class RunsController {
       take: 100,
     });
   }
+
   @Get(":id/export") async exportRun(
     @Req() req: any,
     @Param("id") id: string,
@@ -59,6 +63,7 @@ export class RunsController {
       content: JSON.stringify(run.result, null, 2),
     };
   }
+
   @Get(":id") async get(@Req() req: any, @Param("id") id: string) {
     const run = await prisma.run.findUniqueOrThrow({
       where: { id },
@@ -75,6 +80,7 @@ export class RunsController {
     await requireWorkspace(req.user.id, run.workspaceId);
     return run;
   }
+
   @Post() async start(@Req() req: any, @Body() body: unknown) {
     const x = Start.parse(body);
     const a = await prisma.agent.findUniqueOrThrow({
@@ -85,7 +91,7 @@ export class RunsController {
       "ADMIN",
       "OPERATOR",
     ]);
-    const version = a.activeVersionId
+    const version = (a.activeVersionId && !x.forceLiveAi)
       ? await prisma.agentVersion.findUnique({
           where: { id: a.activeVersionId },
         })
@@ -97,7 +103,7 @@ export class RunsController {
         versionId: version?.id,
         triggerType: x.triggerType,
         status: "QUEUED",
-        executionMode: version ? "FAST_PATH" : "DISCOVERY",
+        executionMode: (version && !x.forceLiveAi) ? "FAST_PATH" : "DISCOVERY",
         idempotencyKey: `${a.id}-${crypto.randomUUID()}`,
       },
     });
@@ -105,6 +111,7 @@ export class RunsController {
     await audit(a.workspaceId, req.user.id, "RUN_CREATED", "run", run.id);
     return run;
   }
+
   @Post(":id/cancel") async cancel(@Req() req: any, @Param("id") id: string) {
     const run = await prisma.run.findUniqueOrThrow({ where: { id } });
     await requireWorkspace(req.user.id, run.workspaceId, [

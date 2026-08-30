@@ -1,5 +1,5 @@
 import { Module } from "@nestjs/common";
-import { APP_GUARD } from "@nestjs/core";
+import { APP_GUARD, Reflector } from "@nestjs/core";
 import { AuthGuard } from "./common/auth.guard.js";
 import { HealthController } from "./modules/health.controller.js";
 import { WorkspacesController } from "./modules/workspaces.controller.js";
@@ -22,6 +22,6 @@ import { AdminController } from "./modules/admin.controller.js";
     IntegrationsController,
     AdminController,
   ],
-  providers: [{ provide: APP_GUARD, useClass: AuthGuard }],
+  providers: [Reflector, { provide: APP_GUARD, useClass: AuthGuard }],
 })
 export class AppModule {}
