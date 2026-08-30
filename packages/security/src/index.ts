@@ -41,11 +41,14 @@ export async function assertSafeUrl(
 
   if (
     allowedDomains?.length &&
-    !allowedDomains.some(
-      (d) => d === "*" || d === "all" || url.hostname === d || url.hostname.endsWith(`.${d}`),
-    )
-  )
+    !allowedDomains.some((d) => {
+      if (d === "*" || d === "all") return true;
+      const clean = d.replace(/^\*\./, "").trim();
+      return url.hostname === clean || url.hostname.endsWith(`.${clean}`);
+    })
+  ) {
     throw new Error("Domain is outside approved boundary");
+  }
 
   const answers = await dns.lookup(url.hostname, { all: true }).catch(() => []);
   if (
