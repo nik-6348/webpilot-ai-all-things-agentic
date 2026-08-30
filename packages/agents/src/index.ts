@@ -26,13 +26,14 @@ function normalizePlanJson(raw: any, input: { goal: string; targetUrl: string; a
     return raw;
   }
 
-  const startUrl = raw.startUrl || raw.target_url || raw.targetUrl || input.targetUrl;
+  const startUrl = raw.workflow?.startUrl || raw.workflow?.targetUrl || raw.startUrl || raw.target_url || raw.targetUrl || input.targetUrl;
   const validStartUrl = startUrl.startsWith("http") ? startUrl : `https://${startUrl}`;
-  const allowedDomains = raw.allowedDomains || raw.allowed_domains || input.allowedDomains;
+  const allowedDomains = raw.workflow?.allowedDomains || raw.allowedDomains || raw.allowed_domains || input.allowedDomains;
 
   const validActionTypes = ["NAVIGATE", "CLICK", "TYPE", "SELECT", "CHECK", "UNCHECK", "SCROLL", "WAIT_FOR", "EXTRACT", "DOWNLOAD", "UPLOAD", "ASSERT", "SCREENSHOT", "DONE"];
 
-  const steps = (raw.steps || []).map((s: any, idx: number) => {
+  const rawSteps = raw.workflow?.steps || raw.steps || raw.plan || raw.workflow?.plan || [];
+  const steps = rawSteps.map((s: any, idx: number) => {
     let actionType = "NAVIGATE";
     const rawAction = String(s.type || s.action || "").toUpperCase();
     if (validActionTypes.includes(rawAction)) {
@@ -48,15 +49,39 @@ function normalizePlanJson(raw: any, input: { goal: string; targetUrl: string; a
     }
 
     return {
-      id: String(s.id || s.step_id || `step_${idx + 1}`),
+      id: String(s.id || s.step_id || s.step || `step_${idx + 1}`),
       type: actionType,
       description: s.description || s.summary || `Execute step ${idx + 1}`,
-      url: s.url || validStartUrl,
+      url: s.url || s.target || validStartUrl,
       risk: ["LOW", "MEDIUM", "HIGH"].includes(s.risk) ? s.risk : "LOW",
     };
   });
 
-  const rawFields = raw.extraction_schema?.fields || raw.extractionSchema?.fields || [];
+  let rawFields: any[] = [];
+  const extSchema = raw.workflow?.extractionSchema || raw.extractionSchema || raw.workflow?.extraction_schema || raw.extraction_schema;
+  if (Array.isArray(extSchema)) {
+    rawFields = extSchema;
+  } else if (Array.isArray(extSchema?.fields)) {
+    rawFields = extSchema.fields;
+  } else if (extSchema?.properties || extSchema?.items?.properties) {
+    const props = extSchema.properties || extSchema.items?.properties;
+    const arrayPropKey = Object.keys(props).find(k => props[k].type === "array");
+    if (arrayPropKey && props[arrayPropKey].items?.properties) {
+      const itemProps = props[arrayPropKey].items.properties;
+      rawFields = Object.keys(itemProps).map(k => ({
+        name: k,
+        type: itemProps[k].type || "string",
+        description: itemProps[k].description || ""
+      }));
+    } else {
+      rawFields = Object.keys(props).map(k => ({
+        name: k,
+        type: props[k].type || "string",
+        description: props[k].description || ""
+      }));
+    }
+  }
+
   const fields = rawFields.length > 0 ? rawFields : [
     { name: "id", type: "string", required: true },
     { name: "title", type: "string", required: true },
@@ -200,7 +225,21 @@ async function runJson<T extends z.ZodObject<any>>(
   const cleanedJson = extractCleanJson(text);
   console.log(`✨ [CLEANED JSON: ${name}]:\n${cleanedJson}\n`);
 
-  let rawObj = JSON.parse(cleanedJson);
+  let rawObj: any;
+  try {
+    rawObj = JSON.parse(cleanedJson);
+  } catch (e: any) {
+    console.warn(`⚠️ [JSON PARSE ERROR]: ${e.message}. Attempting auto-recovery...`);
+    try {
+      rawObj = JSON.parse(cleanedJson + "}");
+    } catch (e2) {
+      try {
+        rawObj = JSON.parse(cleanedJson + "}}");
+      } catch (e3) {
+        throw e; // Throw original error if recovery fails
+      }
+    }
+  }
 
   if (name === "planner_agent" && inputContext) {
     rawObj = normalizePlanJson(rawObj, inputContext);
