@@ -127,9 +127,8 @@ export default function Connections() {
         {/* 🌟 GLOWING GRADIENT THEME CREATE BUTTON */}
         <button
           onClick={handleOpenAdd}
-          className="px-5 py-3 rounded-xl bg-gradient-to-r from-amber-500 via-indigo-500 to-sky-500 hover:opacity-95 text-white font-extrabold text-xs shadow-lg shadow-amber-500/25 transition-all flex items-center gap-2 cursor-pointer shrink-0"
+          className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-indigo-500 via-sky-500 to-cyan-400 hover:opacity-95 text-white font-extrabold text-xs shadow-lg shadow-indigo-500/25 transition-all flex items-center gap-2 cursor-pointer shrink-0 border border-indigo-400/30 active:scale-95"
         >
-          <Sparkles className="w-4 h-4 text-amber-200" />
           <Plus className="w-4 h-4" /> Add Encrypted Credentials
         </button>
       </div>
@@ -282,7 +281,7 @@ export default function Connections() {
                 <button
                   type="submit"
                   disabled={submitting}
-                  className="px-5 py-2 rounded-xl bg-gradient-to-r from-amber-500 to-indigo-500 hover:opacity-90 text-white font-extrabold text-xs shadow-md shadow-amber-500/20"
+                  className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-indigo-500 via-sky-500 to-cyan-400 hover:opacity-95 text-white font-extrabold text-xs shadow-md shadow-indigo-500/25 transition-all cursor-pointer"
                 >
                   {submitting ? "Encrypting & Saving..." : editingId ? "Update Credentials" : "Save Encrypted Credentials"}
                 </button>
