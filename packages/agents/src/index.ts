@@ -1,4 +1,5 @@
 import { InMemoryRunner, LlmAgent } from "@google/adk";
+import { GoogleGenAI } from "@google/genai";
 import {
   PlanSchema,
   BrowserDecisionSchema,
@@ -20,45 +21,195 @@ function extractCleanJson(text: string): string {
   return cleaned;
 }
 
+function normalizePlanJson(raw: any, input: { goal: string; targetUrl: string; allowedDomains: string[] }): any {
+  if (raw.summary && raw.workflow?.startUrl && Array.isArray(raw.workflow?.steps)) {
+    return raw;
+  }
+
+  const startUrl = raw.startUrl || raw.target_url || raw.targetUrl || input.targetUrl;
+  const validStartUrl = startUrl.startsWith("http") ? startUrl : `https://${startUrl}`;
+  const allowedDomains = raw.allowedDomains || raw.allowed_domains || input.allowedDomains;
+
+  const validActionTypes = ["NAVIGATE", "CLICK", "TYPE", "SELECT", "CHECK", "UNCHECK", "SCROLL", "WAIT_FOR", "EXTRACT", "DOWNLOAD", "UPLOAD", "ASSERT", "SCREENSHOT", "DONE"];
+
+  const steps = (raw.steps || []).map((s: any, idx: number) => {
+    let actionType = "NAVIGATE";
+    const rawAction = String(s.type || s.action || "").toUpperCase();
+    if (validActionTypes.includes(rawAction)) {
+      actionType = rawAction;
+    } else if (rawAction.includes("NAVIGATE")) {
+      actionType = "NAVIGATE";
+    } else if (rawAction.includes("CLICK")) {
+      actionType = "CLICK";
+    } else if (rawAction.includes("WAIT")) {
+      actionType = "WAIT_FOR";
+    } else if (rawAction.includes("EXTRACT")) {
+      actionType = "EXTRACT";
+    }
+
+    return {
+      id: String(s.id || s.step_id || `step_${idx + 1}`),
+      type: actionType,
+      description: s.description || s.summary || `Execute step ${idx + 1}`,
+      url: s.url || validStartUrl,
+      risk: ["LOW", "MEDIUM", "HIGH"].includes(s.risk) ? s.risk : "LOW",
+    };
+  });
+
+  const rawFields = raw.extraction_schema?.fields || raw.extractionSchema?.fields || [];
+  const fields = rawFields.length > 0 ? rawFields : [
+    { name: "id", type: "string", required: true },
+    { name: "title", type: "string", required: true },
+    { name: "price", type: "string", required: false },
+  ];
+
+  return {
+    summary: raw.summary || raw.workflow_name || `Automated Plan: ${input.goal}`,
+    requiresApproval: true,
+    workflow: {
+      version: 1,
+      goal: input.goal,
+      startUrl: validStartUrl,
+      allowedDomains: Array.isArray(allowedDomains) ? allowedDomains : [allowedDomains],
+      extractionSchema: {
+        fields: fields.map((f: any) => ({
+          name: String(f.name || f.fieldName || "field"),
+          type: ["string", "number", "boolean", "date", "url", "array"].includes(f.type) ? f.type : "string",
+          required: Boolean(f.required),
+        })),
+      },
+      steps: steps.length > 0 ? steps : [
+        {
+          id: "step_1",
+          type: "NAVIGATE",
+          description: `Navigate to ${validStartUrl}`,
+          url: validStartUrl,
+          risk: "LOW",
+        },
+        {
+          id: "step_2",
+          type: "EXTRACT",
+          description: "Extract target web data",
+          risk: "LOW",
+        },
+      ],
+    },
+  };
+}
+
+async function callDirectGenAi(instruction: string, parts: any[]): Promise<string> {
+  const useVertex = process.env.GOOGLE_GENAI_USE_VERTEXAI === "true";
+  const project = process.env.GOOGLE_CLOUD_PROJECT || "webpilot-ai-hackathon";
+  const location = process.env.GOOGLE_CLOUD_LOCATION || "us-central1";
+
+  console.log(`📡 [DIRECT GENAI FALLBACK]: Invoking @google/genai (VertexAI: ${useVertex}, Project: ${project}, Location: ${location})...`);
+
+  const ai = new GoogleGenAI(
+    useVertex
+      ? {
+          vertexai: true,
+          project,
+          location,
+        }
+      : { apiKey: process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || "" }
+  );
+
+  const contents = parts.map((p) => {
+    if (typeof p === "string") return p;
+    if (p.text) return p.text;
+    return JSON.stringify(p);
+  });
+
+  const response = await ai.models.generateContent({
+    model,
+    contents,
+    config: {
+      systemInstruction: `${instruction}\n\nIMPORTANT: Respond ONLY with a valid JSON object matching the requested schema. Do not include markdown codeblocks or extra text.`,
+      responseMimeType: "application/json",
+    },
+  });
+
+  return response.text || "";
+}
+
 async function runJson<T extends z.ZodObject<any>>(
   name: string,
   instruction: string,
   schema: T,
   parts: any[],
+  inputContext?: any,
 ): Promise<z.infer<T>> {
-  const agent = new LlmAgent({
-    name,
-    model,
-    instruction,
-    outputSchema: schema as any,
-    includeContents: "none",
-  });
-
-  const runner = new InMemoryRunner({ agent, appName: "webpilot" });
-  const session = await runner.sessionService.createSession({
-    appName: "webpilot",
-    userId: "system",
-  });
+  console.log(`\n🤖 [AI AGENT REQUEST: ${name}]`);
+  console.log(`📌 Model: ${model} | Backend: ${process.env.GOOGLE_GENAI_USE_VERTEXAI === "true" ? "VERTEX_AI" : "GEMINI_API"}`);
+  console.log(`📝 Instruction:\n${instruction}`);
+  console.log(`📥 Input Parts:\n${JSON.stringify(parts, null, 2)}\n`);
 
   let text = "";
-  for await (const event of runner.runAsync({
-    userId: "system",
-    sessionId: session.id,
-    newMessage: { role: "user", parts },
-  })) {
-    for (const p of event.content?.parts || []) {
-      if (p.text) {
-        text += p.text;
+
+  try {
+    const agent = new LlmAgent({
+      name,
+      model,
+      instruction: `${instruction}\n\nIMPORTANT: Respond ONLY with a valid JSON object matching the requested schema. Do not include extra conversational text.`,
+      outputSchema: schema as any,
+      disallowTransferToParent: true,
+      disallowTransferToPeers: true,
+    });
+
+    const runner = new InMemoryRunner({ agent, appName: "webpilot" });
+    const session = await runner.sessionService.createSession({
+      appName: "webpilot",
+      userId: "system",
+    });
+
+    for await (const event of runner.runAsync({
+      userId: "system",
+      sessionId: session.id,
+      newMessage: { role: "user", parts },
+    })) {
+      const e = event as any;
+
+      if (e.content?.parts) {
+        for (const p of e.content.parts) {
+          if (p.text) text += p.text;
+        }
+      }
+      if (e.text) {
+        text += e.text;
+      }
+      if (e.output) {
+        if (typeof e.output === "string") text += e.output;
+        else text += JSON.stringify(e.output);
       }
     }
+  } catch (adkErr: any) {
+    console.warn(`⚠️ [ADK RUNNER NOTICE]: ${adkErr.message}`);
   }
 
+  // Fallback to Direct Google GenAI SDK if ADK returned empty text
   if (!text.trim()) {
-    throw new Error(`${name} produced no structured output`);
+    text = await callDirectGenAi(instruction, parts);
+  }
+
+  console.log(`📤 [AI RAW RESPONSE: ${name}]:\n${text || "(EMPTY RESPONSE)"}\n`);
+
+  if (!text.trim()) {
+    throw new Error(`${name} produced no structured output from Vertex AI / Gemini API`);
   }
 
   const cleanedJson = extractCleanJson(text);
-  return schema.parse(JSON.parse(cleanedJson));
+  console.log(`✨ [CLEANED JSON: ${name}]:\n${cleanedJson}\n`);
+
+  let rawObj = JSON.parse(cleanedJson);
+
+  if (name === "planner_agent" && inputContext) {
+    rawObj = normalizePlanJson(rawObj, inputContext);
+  }
+
+  const parsed = schema.parse(rawObj);
+  console.log(`✅ [PARSED VALIDATED OUTPUT: ${name}]:\n${JSON.stringify(parsed, null, 2)}\n`);
+
+  return parsed;
 }
 
 export async function planWorkflow(input: {
@@ -120,6 +271,7 @@ export async function planWorkflow(input: {
     `You design safe reusable browser workflows. Produce a concrete plan and extraction schema. Never widen allowed domains. Credentials are referenced only by provided field names; never ask for secret values. ${WEB_CONTENT_BOUNDARY}`,
     PlanSchema,
     [{ text: JSON.stringify(input) }],
+    input,
   );
 }
 
