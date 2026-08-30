@@ -148,21 +148,33 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
         {/* Footer Profile & Status */}
         <div className="p-3 border-t border-slate-800/60">
-          <div className={`flex items-center gap-3 ${isCollapsed ? "justify-center" : "px-2 py-1.5"}`}>
-            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-indigo-500 to-sky-400 p-[1px] shrink-0">
-              <div className="w-full h-full bg-[#0d1322] rounded-full flex items-center justify-center text-sky-400 font-black text-xs">
-                AI
+          <div className={`flex items-center justify-between gap-2 ${isCollapsed ? "justify-center" : "px-2 py-1.5"}`}>
+            <div className="flex items-center gap-3 overflow-hidden">
+              <div className="w-8 h-8 rounded-full bg-gradient-to-br from-indigo-500 to-sky-400 p-[1px] shrink-0">
+                <div className="w-full h-full bg-[#0d1322] rounded-full flex items-center justify-center text-sky-400 font-black text-xs">
+                  AI
+                </div>
               </div>
+              {!isCollapsed && (
+                <div className="flex flex-col overflow-hidden">
+                  <span className="text-xs font-bold text-slate-200 truncate flex items-center gap-1">
+                    Demo Admin <UserCheck className="w-3 h-3 text-emerald-400 inline" />
+                  </span>
+                  <span className="text-[10px] text-emerald-400 font-mono flex items-center gap-1">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span> Local Dev Auth
+                  </span>
+                </div>
+              )}
             </div>
+
             {!isCollapsed && (
-              <div className="flex flex-col overflow-hidden">
-                <span className="text-xs font-bold text-slate-200 truncate flex items-center gap-1">
-                  Enterprise Node <UserCheck className="w-3 h-3 text-emerald-400 inline" />
-                </span>
-                <span className="text-[10px] text-emerald-400 font-mono flex items-center gap-1">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span> Worker Active
-                </span>
-              </div>
+              <Link
+                href="/login"
+                className="text-[11px] font-semibold text-slate-400 hover:text-indigo-300 hover:bg-slate-800/80 px-2 py-1 rounded-lg border border-slate-700/50 transition-colors shrink-0"
+                title="Go to Login Page"
+              >
+                Login
+              </Link>
             )}
           </div>
         </div>
