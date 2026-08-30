@@ -31,7 +31,7 @@ export default function NewAgent() {
     description: "Public web data extraction task",
     goal: "Open target web page and extract requested information cleanly.",
     targetUrl: "https://example.com",
-    allowedDomains: "example.com",
+    allowedDomains: "*",
   });
 
   async function loadConnections() {
@@ -50,7 +50,7 @@ export default function NewAgent() {
     loadConnections();
   }, []);
 
-  // Handle 1-Click Single Prompt Execution
+  // Handle 1-Click Single Prompt Execution with Smart URL & Wildcard Domain Parsing
   async function handleSinglePromptSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!singlePrompt.trim()) return;
@@ -61,9 +61,21 @@ export default function NewAgent() {
       const w = await workspace();
       if (!w?.id) throw new Error("Workspace context missing");
 
-      // Auto-extract URL if present in prompt or default to target site
+      // Smart Auto-extract URL / Domain Parser
+      let extractedUrl = "https://www.google.com";
       const urlMatch = singlePrompt.match(/https?:\/\/[^\s]+/i);
-      const extractedUrl = urlMatch ? urlMatch[0] : "https://example.com";
+      if (urlMatch) {
+        extractedUrl = urlMatch[0];
+      } else {
+        const domainMatch = singlePrompt.match(/([a-zA-Z0-9-]+\.[a-zA-Z]{2,})/i);
+        if (domainMatch) {
+          extractedUrl = `https://${domainMatch[0]}`;
+        } else if (singlePrompt.toLowerCase().includes("flipkart")) {
+          extractedUrl = "https://www.flipkart.com";
+        } else if (singlePrompt.toLowerCase().includes("amazon")) {
+          extractedUrl = "https://www.amazon.in";
+        }
+      }
 
       const out = await api<any>("/api/v1/agents", {
         method: "POST",
@@ -126,7 +138,7 @@ export default function NewAgent() {
     }
   }
 
-  // Handle Create Credentials Modal Submit (Encrypted in SecretVault!)
+  // Handle Create Credentials Modal Submit
   async function handleCreateConnection(e: React.FormEvent) {
     e.preventDefault();
     if (!newConnName.trim() || !newConnUser.trim()) return;
@@ -215,18 +227,15 @@ export default function NewAgent() {
             <textarea
               value={singlePrompt}
               onChange={(e) => setSinglePrompt(e.target.value)}
-              placeholder="e.g. Open target web page https://example.com/portal, navigate to orders section, and extract PO ID, status, and total amount..."
+              placeholder="e.g. open flipkart and extract top 5 highest expensive phones..."
               className="w-full h-40 px-4 py-3 rounded-xl bg-slate-950/90 border border-slate-800 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500 transition-colors leading-relaxed font-mono"
               required
             />
           </div>
 
-          <div className="p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-between text-xs text-emerald-300">
+          <div className="p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/30 flex items-center text-xs text-emerald-300">
             <span className="flex items-center gap-2 font-medium">
               <CheckCircle2 className="w-4 h-4 text-emerald-400" /> Public Web Automation Mode: No target site login credentials required.
-            </span>
-            <span className="font-mono font-bold text-[10px] bg-emerald-500/20 px-2 py-0.5 rounded border border-emerald-500/40">
-              0 Credentials Needed
             </span>
           </div>
 
