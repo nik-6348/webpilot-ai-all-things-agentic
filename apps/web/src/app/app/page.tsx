@@ -156,7 +156,7 @@ export default function Dashboard() {
               type="text"
               value={quickPrompt}
               onChange={(e) => setQuickPrompt(e.target.value)}
-              placeholder="e.g. Open https://ai.nik6348.in/ and login with email rajputnik911@gmail.com..."
+              placeholder="e.g. Open https://example.com/portal, navigate to orders section, and extract PO ID, status, and total amount..."
               className="flex-1 px-4 py-3 rounded-xl bg-slate-950/80 border border-slate-800 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 transition-colors"
             />
             <button
