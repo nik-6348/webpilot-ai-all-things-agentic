@@ -1,14 +1,16 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
-import { Zap, ShieldCheck, Key, Plus, Lock, X, CheckCircle2 } from "lucide-react";
+import { Zap, ShieldCheck, Key, Plus, Lock, X, CheckCircle2, Edit2, Trash2, Sparkles } from "lucide-react";
 import { api, workspace } from "../../../lib/api";
 
 export default function Connections() {
   const [connections, setConnections] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [showModal, setShowModal] = useState(false);
 
+  // Modal State
+  const [showModal, setShowModal] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [name, setName] = useState("");
   const [domain, setDomain] = useState("");
   const [user, setUser] = useState("");
@@ -33,7 +35,25 @@ export default function Connections() {
     loadConnections();
   }, []);
 
-  async function handleCreate(e: React.FormEvent) {
+  const handleOpenAdd = () => {
+    setEditingId(null);
+    setName("");
+    setDomain("example.com");
+    setUser("");
+    setPass("");
+    setShowModal(true);
+  };
+
+  const handleOpenEdit = (conn: any) => {
+    setEditingId(conn.id);
+    setName(conn.name);
+    setDomain(conn.allowedDomains?.[0] || "example.com");
+    setUser("");
+    setPass("");
+    setShowModal(true);
+  };
+
+  async function handleSave(e: React.FormEvent) {
     e.preventDefault();
     if (!name.trim() || !user.trim()) return;
     setSubmitting(true);
@@ -42,29 +62,51 @@ export default function Connections() {
       const w = await workspace();
       if (!w?.id) throw new Error("Workspace context missing");
 
-      await api("/api/v1/connections", {
-        method: "POST",
-        body: JSON.stringify({
-          workspaceId: w.id,
-          name,
-          allowedDomains: [domain || "example.com"],
-          credentials: {
-            username: user,
-            password: pass,
-          },
-        }),
-      });
+      if (editingId) {
+        // Update Existing Connection
+        await api(`/api/v1/connections/${editingId}`, {
+          method: "PATCH",
+          body: JSON.stringify({
+            name,
+            allowedDomains: [domain || "example.com"],
+            credentials: {
+              username: user,
+              password: pass,
+            },
+          }),
+        });
+      } else {
+        // Create New Connection
+        await api("/api/v1/connections", {
+          method: "POST",
+          body: JSON.stringify({
+            workspaceId: w.id,
+            name,
+            allowedDomains: [domain || "example.com"],
+            credentials: {
+              username: user,
+              password: pass,
+            },
+          }),
+        });
+      }
 
       await loadConnections();
       setShowModal(false);
-      setName("");
-      setDomain("");
-      setUser("");
-      setPass("");
     } catch (err: any) {
       alert(err.message || "Failed to save encrypted credentials");
     } finally {
       setSubmitting(false);
+    }
+  }
+
+  async function handleDelete(id: string) {
+    if (!confirm("Are you sure you want to delete these encrypted site credentials?")) return;
+    try {
+      await api(`/api/v1/connections/${id}`, { method: "DELETE" });
+      await loadConnections();
+    } catch (err: any) {
+      alert(err.message || "Failed to delete connection");
     }
   }
 
@@ -82,10 +124,12 @@ export default function Connections() {
           </p>
         </div>
 
+        {/* 🌟 GLOWING GRADIENT THEME CREATE BUTTON */}
         <button
-          onClick={() => setShowModal(true)}
-          className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-indigo-500 hover:opacity-95 text-white font-extrabold text-xs shadow-lg shadow-amber-500/20 transition-all flex items-center gap-2 cursor-pointer"
+          onClick={handleOpenAdd}
+          className="px-5 py-3 rounded-xl bg-gradient-to-r from-amber-500 via-indigo-500 to-sky-500 hover:opacity-95 text-white font-extrabold text-xs shadow-lg shadow-amber-500/25 transition-all flex items-center gap-2 cursor-pointer shrink-0"
         >
+          <Sparkles className="w-4 h-4 text-amber-200" />
           <Plus className="w-4 h-4" /> Add Encrypted Credentials
         </button>
       </div>
@@ -100,8 +144,8 @@ export default function Connections() {
             Public web automation requires 0 credentials. If your target site requires login, click below to add encrypted credentials.
           </p>
           <button
-            onClick={() => setShowModal(true)}
-            className="inline-block px-4 py-2 rounded-xl bg-indigo-600 text-white font-extrabold text-xs hover:bg-indigo-500 transition-colors"
+            onClick={handleOpenAdd}
+            className="inline-block px-5 py-2.5 rounded-xl bg-gradient-to-r from-indigo-500 to-sky-500 text-white font-extrabold text-xs hover:opacity-90 transition-all shadow-md shadow-indigo-500/20"
           >
             Add First Site Connection
           </button>
@@ -109,7 +153,7 @@ export default function Connections() {
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           {connections.map((c) => (
-            <div key={c.id} className="glass-panel rounded-2xl p-6 flex flex-col justify-between space-y-4">
+            <div key={c.id} className="glass-panel rounded-2xl p-6 flex flex-col justify-between space-y-4 hover:border-amber-500/40 transition-all">
               <div>
                 <div className="flex items-center justify-between mb-3">
                   <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 flex items-center gap-1">
@@ -126,16 +170,34 @@ export default function Connections() {
                 </p>
               </div>
 
-              <div className="pt-3 border-t border-slate-800/80 flex items-center justify-between text-xs text-slate-400">
-                <span className="font-mono text-[11px]">Fields: {c.credentialFields?.join(", ") || "username, password"}</span>
-                <span className="text-emerald-400 font-extrabold">Configured ✓</span>
+              <div className="pt-3 border-t border-slate-800/80 flex items-center justify-between">
+                <span className="font-mono text-[11px] text-slate-400">
+                  Fields: {c.credentialFields?.join(", ") || "username, password"}
+                </span>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => handleOpenEdit(c)}
+                    className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-sky-400 font-bold text-[11px] transition-colors flex items-center gap-1"
+                  >
+                    <Edit2 className="w-3 h-3" /> Edit Key
+                  </button>
+
+                  <button
+                    onClick={() => handleDelete(c.id)}
+                    className="p-1.5 rounded-lg bg-slate-800 hover:bg-rose-900/40 text-slate-400 hover:text-rose-400 transition-colors"
+                    title="Delete Credentials"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
               </div>
             </div>
           ))}
         </div>
       )}
 
-      {/* 🔐 MODAL: CREATE ENCRYPTED CREDENTIALS */}
+      {/* 🔐 MODAL: CREATE / EDIT ENCRYPTED CREDENTIALS */}
       {showModal && (
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
           <div className="relative max-w-lg w-full bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden p-6 space-y-6">
@@ -143,7 +205,8 @@ export default function Connections() {
               <div>
                 <span className="text-xs font-bold text-amber-400 uppercase tracking-wider">SecretVault KMS Encryption</span>
                 <h2 className="text-lg font-black text-white flex items-center gap-2 mt-0.5">
-                  <Lock className="w-4 h-4 text-emerald-400" /> Create Encrypted Credentials
+                  <Lock className="w-4 h-4 text-emerald-400" />
+                  {editingId ? "Update Site Credentials" : "Create Encrypted Credentials"}
                 </h2>
               </div>
               <button
@@ -154,14 +217,14 @@ export default function Connections() {
               </button>
             </div>
 
-            <form onSubmit={handleCreate} className="space-y-4">
+            <form onSubmit={handleSave} className="space-y-4">
               <div>
                 <label className="block text-xs font-bold text-slate-300 mb-1">Target Account Name</label>
                 <input
                   type="text"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  placeholder="e.g. Portal Admin Account"
+                  placeholder="e.g. E-Commerce Supplier Portal Account"
                   className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white focus:outline-none focus:border-amber-500"
                   required
                 />
@@ -219,9 +282,9 @@ export default function Connections() {
                 <button
                   type="submit"
                   disabled={submitting}
-                  className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold text-xs shadow-md shadow-amber-500/20"
+                  className="px-5 py-2 rounded-xl bg-gradient-to-r from-amber-500 to-indigo-500 hover:opacity-90 text-white font-extrabold text-xs shadow-md shadow-amber-500/20"
                 >
-                  {submitting ? "Encrypting & Saving..." : "Save Encrypted Credentials"}
+                  {submitting ? "Encrypting & Saving..." : editingId ? "Update Credentials" : "Save Encrypted Credentials"}
                 </button>
               </div>
             </form>
