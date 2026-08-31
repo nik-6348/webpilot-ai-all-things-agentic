@@ -67,6 +67,15 @@ export async function detectChallenge(page: Page) {
 export async function extractRecords(page: Page, schema: ExtractionSchema, maxCount: number = 10) {
   try {
     const rawRecords = await page.evaluate(({ fields, maxLimit }) => {
+      // Elements inside navigation/chrome regions are never the actual
+      // content being asked for — a site's sidebar/header/footer link list
+      // reliably out-shapes real content (many short, uniform, repeated
+      // <li><a> elements), which is exactly what these container selectors
+      // are also looking for. Excluding them first is cheap and removes
+      // the most common source of confidently-wrong extraction.
+      const isInChrome = (el: Element) =>
+        Boolean(el.closest("nav, header, footer, aside, [role='navigation'], [role='banner'], [role='contentinfo'], #mw-panel, .sidebar, .navbox"));
+
       // Find candidate item/card container elements on the web page
       const selectors = [
         "[data-id]",
@@ -83,7 +92,7 @@ export async function extractRecords(page: Page, schema: ExtractionSchema, maxCo
 
       let containers: Element[] = [];
       for (const sel of selectors) {
-        const found = Array.from(document.querySelectorAll(sel));
+        const found = Array.from(document.querySelectorAll(sel)).filter((el) => !isInChrome(el));
         if (found.length >= 2) {
           containers = found.slice(0, maxLimit);
           break;
@@ -92,7 +101,7 @@ export async function extractRecords(page: Page, schema: ExtractionSchema, maxCo
 
       // Fallback: If no distinct repeating container found, pick top child blocks with anchor tags
       if (!containers.length) {
-        const anchors = Array.from(document.querySelectorAll("body a[href]"));
+        const anchors = Array.from(document.querySelectorAll("body a[href]")).filter((el) => !isInChrome(el));
         containers = anchors
           .map(a => a.closest("div, article, li") || a)
           .filter((v, i, self) => self.indexOf(v) === i)
@@ -152,12 +161,18 @@ export async function extractRecords(page: Page, schema: ExtractionSchema, maxCo
     console.warn("[EXTRACT_RECORDS ERROR]:", err);
   }
 
-  // Basic fallback if evaluate returned empty
-  const fallbackRec: Record<string, any> = {};
-  for (const f of schema.fields) {
-    fallbackRec[f.name] = f.name.includes("url") ? page.url() : `Extracted ${f.name}`;
-  }
-  return [fallbackRec];
+  // No real content was found on the page. This used to silently return
+  // one fabricated record (literal strings like "Extracted title") so the
+  // run would report success with fake data — the run then never fails,
+  // so self-healing never triggers even though the site clearly changed.
+  // Throwing here is what actually wires this into the self-healing path:
+  // fast()/discover()'s callers already catch step failures and either
+  // attempt an inline repair (discovery) or hand off to recover()
+  // (fast path) — this extraction failure now takes that same path
+  // instead of being masked.
+  throw new Error(
+    "Extraction found no matching content on the page — the site's structure likely changed",
+  );
 }
 function resolveWithin(base: any, l: Locator) {
   switch (l.strategy) {

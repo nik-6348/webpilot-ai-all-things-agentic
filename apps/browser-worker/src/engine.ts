@@ -636,11 +636,22 @@ async function fast(
           spec.extractionSchema,
         );
         if (Array.isArray(out)) extracted = out;
-        await checkpoint(runId, step, i, "COMPLETED", { url: page.url() });
+        // Fast path is "zero reasoning" (no model calls), not "no
+        // evidence" — a per-step screenshot costs one image capture + GCS
+        // upload, not a Gemini call, and gives the same audit trail
+        // discovery runs already have.
+        const shotRef = await artifacts
+          .put(`runs/${runId}/steps/step_${i + 1}.jpg`, await page.screenshot({ type: "jpeg", quality: 40 }), "image/jpeg")
+          .catch(() => undefined);
+        await checkpoint(runId, step, i, "COMPLETED", { url: page.url(), screenshot: shotRef });
       } catch (e: any) {
+        const shotRef = await artifacts
+          .put(`runs/${runId}/steps/step_${i + 1}_failed.jpg`, await page.screenshot({ type: "jpeg", quality: 40 }).catch(() => Buffer.from([])), "image/jpeg")
+          .catch(() => undefined);
         await checkpoint(runId, step, i, "FAILED", {
           error: String(e.message || e),
           url: page.url(),
+          screenshot: shotRef,
         });
         return await recover(
           runId,
