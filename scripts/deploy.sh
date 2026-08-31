@@ -12,7 +12,8 @@ REGION="us-central1"
 REPO="${REGION}-docker.pkg.dev/${PROJECT_ID}/webpilot"
 SQL_CONN="webpilot-ai-hackathon:us-central1:webpilot-postgres"
 DB_SECRET="webpilot-database-url"
-BUCKET="webpilot-ai-hackathon-artifacts"
+TOKEN_SECRET="webpilot-internal-worker-token"
+BUCKET="${PROJECT_ID}-artifacts"
 QUEUE="webpilot-runs"
 TOPIC="webpilot-events"
 
@@ -91,8 +92,8 @@ gcloud run deploy webpilot-api \
   --image "$REPO/api:$SHA" --region "$REGION" --project "$PROJECT_ID" \
   --service-account "$API_SA" --allow-unauthenticated \
   --add-cloudsql-instances "$SQL_CONN" \
-  --set-secrets DATABASE_URL="$DB_SECRET:latest" \
-  --set-env-vars "GOOGLE_CLOUD_PROJECT=$PROJECT_ID,GOOGLE_CLOUD_LOCATION=global,GOOGLE_GENAI_USE_VERTEXAI=true,GEMINI_MODEL=gemini-3.7-flash,FIREBASE_PROJECT_ID=$PROJECT_ID,WORKER_URL=$WORKER_URL,WORKER_AUDIENCE=$WORKER_URL,TASK_QUEUE=$QUEUE,TASK_LOCATION=$REGION,TASK_INVOKER_SA=$TASK_SA,SCHEDULER_INVOKER_SA=$SCHED_SA,LOCAL_TASKS=false,LOCAL_SECRETS=false,LOCAL_SCHEDULER=false,LOCAL_PUBSUB=false,LOCAL_AUTH_BYPASS=false,ALLOW_PRIVATE_DEMO=false,RESEND_API_KEY=${RESEND_API_KEY:-},RESEND_FROM_EMAIL=${RESEND_FROM_EMAIL:-},ADMIN_NOTIFY_EMAIL=${ADMIN_NOTIFY_EMAIL:-}" \
+  --set-secrets DATABASE_URL="$DB_SECRET:latest",INTERNAL_WORKER_TOKEN="$TOKEN_SECRET:latest" \
+  --set-env-vars "GOOGLE_CLOUD_PROJECT=$PROJECT_ID,GOOGLE_CLOUD_LOCATION=global,GOOGLE_GENAI_USE_VERTEXAI=true,GEMINI_MODEL=gemini-3.7-flash,FIREBASE_PROJECT_ID=$PROJECT_ID,WORKER_URL=$WORKER_URL,WORKER_AUDIENCE=$WORKER_URL,TASK_QUEUE=$QUEUE,TASK_LOCATION=$REGION,TASK_INVOKER_SA=$TASK_SA,SCHEDULER_INVOKER_SA=$SCHED_SA,ARTIFACT_BUCKET=$BUCKET,LOCAL_ARTIFACTS=false,LOCAL_TASKS=false,LOCAL_SECRETS=false,LOCAL_SCHEDULER=false,LOCAL_PUBSUB=false,LOCAL_AUTH_BYPASS=false,ALLOW_PRIVATE_DEMO=false,RESEND_API_KEY=${RESEND_API_KEY:-},RESEND_FROM_EMAIL=${RESEND_FROM_EMAIL:-},ADMIN_NOTIFY_EMAIL=${ADMIN_NOTIFY_EMAIL:-}" \
   --min-instances=0 --max-instances=10
 API_URL=$(gcloud run services describe webpilot-api --region "$REGION" --project "$PROJECT_ID" --format='value(status.url)')
 gcloud run services update webpilot-api --region "$REGION" --project "$PROJECT_ID" \

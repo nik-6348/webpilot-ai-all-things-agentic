@@ -13,7 +13,8 @@ import crypto from "node:crypto";
 // be a bare public/unscoped endpoint (that was the original IDOR). A
 // signature can only be minted by an already-authenticated call to
 // GET /runs/:id (which calls requireWorkspace first), is bound to the
-// exact runId+path it was issued for, and expires in 15 minutes.
+// exact runId+path it was issued for, and expires in 6 hours (see
+// expiresAt below).
 function signArtifactAccess(runId: string, path: string, expiresAt: number): string {
   const key = process.env.INTERNAL_WORKER_TOKEN || "";
   return crypto

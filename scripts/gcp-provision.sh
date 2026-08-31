@@ -12,8 +12,9 @@ PREFIX="webpilot"
 DB_INSTANCE="${PREFIX}-postgres"
 DB_NAME="webpilot"
 DB_USER="webpilot"
+BUCKET="${PROJECT_ID}-artifacts"
 
-echo "== [1/7] Enabling required APIs =="
+echo "== [1/8] Enabling required APIs =="
 gcloud services enable \
   run.googleapis.com \
   sqladmin.googleapis.com \
@@ -27,7 +28,7 @@ gcloud services enable \
   artifactregistry.googleapis.com \
   --project "$PROJECT_ID"
 
-echo "== [2/7] Cloud SQL instance (this is the slow step, ~5-10min) =="
+echo "== [2/8] Cloud SQL instance (this is the slow step, ~5-10min) =="
 if ! gcloud sql instances describe "$DB_INSTANCE" --project "$PROJECT_ID" >/dev/null 2>&1; then
   gcloud sql instances create "$DB_INSTANCE" \
     --project "$PROJECT_ID" \
@@ -46,7 +47,7 @@ fi
 
 DB_PASSWORD=$(openssl rand -base64 24 | tr -d '/+=' | head -c 24)
 
-echo "== [3/7] Database + user =="
+echo "== [3/8] Database + user =="
 gcloud sql databases create "$DB_NAME" --instance="$DB_INSTANCE" --project "$PROJECT_ID" 2>&1 | grep -v "already exists" || true
 gcloud sql users create "$DB_USER" --instance="$DB_INSTANCE" --password="$DB_PASSWORD" --project "$PROJECT_ID" 2>&1 | grep -v "already exists" || \
   gcloud sql users set-password "$DB_USER" --instance="$DB_INSTANCE" --password="$DB_PASSWORD" --project "$PROJECT_ID"
@@ -54,7 +55,15 @@ gcloud sql users create "$DB_USER" --instance="$DB_INSTANCE" --password="$DB_PAS
 CONNECTION_NAME=$(gcloud sql instances describe "$DB_INSTANCE" --project "$PROJECT_ID" --format='value(connectionName)')
 DATABASE_URL="postgresql://${DB_USER}:${DB_PASSWORD}@localhost/${DB_NAME}?host=/cloudsql/${CONNECTION_NAME}"
 
-echo "== [4/7] Service accounts (least-privilege, matches Terraform design) =="
+echo "== [4/8] GCS bucket for run artifacts (screenshots, DOM, results) =="
+if ! gcloud storage buckets describe "gs://${BUCKET}" --project "$PROJECT_ID" >/dev/null 2>&1; then
+  gcloud storage buckets create "gs://${BUCKET}" --project "$PROJECT_ID" --location="$REGION"
+  gcloud storage buckets update "gs://${BUCKET}" --lifecycle-file=/dev/stdin <<'EOF'
+{"rule": [{"action": {"type": "Delete"}, "condition": {"age": 90}}]}
+EOF
+fi
+
+echo "== [5/8] Service accounts (least-privilege, matches Terraform design) =="
 for sa in web api worker notifier task-invoker scheduler-invoker pubsub-invoker; do
   gcloud iam service-accounts create "${PREFIX}-${sa}" --project "$PROJECT_ID" --display-name "WebPilot ${sa}" 2>&1 | grep -v "already exists" || true
 done
@@ -74,6 +83,11 @@ grant "$API_SA" roles/secretmanager.admin # not secretAccessor alone -- the API 
 # reading existing ones, not secretmanager.secrets.create)
 grant "$API_SA" roles/pubsub.publisher
 grant "$API_SA" roles/aiplatform.user
+# The API serves run screenshots/artifacts directly to the browser
+# (GET /runs/:id/artifact) -- it reads from GCS itself, it doesn't just
+# enqueue work for the worker to read, so it needs its own read access.
+gcloud storage buckets add-iam-policy-binding "gs://${BUCKET}" \
+  --member="serviceAccount:$API_SA" --role="roles/storage.objectViewer" >/dev/null
 # Firebase Admin's createCustomToken() (email/password login session bridge)
 # needs the API's own service account to be able to sign blobs for itself
 # via the IAM Credentials API -- this is NOT implied by any of the roles
@@ -89,7 +103,7 @@ grant "$WORKER_SA" roles/pubsub.publisher
 grant "$NOTIFIER_SA" roles/cloudsql.client
 grant "$NOTIFIER_SA" roles/secretmanager.secretAccessor
 
-echo "== [5/7] Secret Manager =="
+echo "== [6/8] Secret Manager =="
 put_secret() {
   local name="$1" value="$2"
   if gcloud secrets describe "$name" --project "$PROJECT_ID" >/dev/null 2>&1; then
@@ -99,12 +113,20 @@ put_secret() {
   fi
 }
 put_secret "${PREFIX}-database-url" "$DATABASE_URL"
+# Stable HMAC key behind the short-lived signed artifact URLs (see
+# apps/api/src/modules/runs.controller.ts). Only created once -- unlike
+# put_secret above, re-running this must NOT rotate it, since that would
+# invalidate every link already handed out to a browser tab.
+if ! gcloud secrets describe "${PREFIX}-internal-worker-token" --project "$PROJECT_ID" >/dev/null 2>&1; then
+  openssl rand -hex 32 | gcloud secrets create "${PREFIX}-internal-worker-token" \
+    --project "$PROJECT_ID" --replication-policy=automatic --data-file=- >/dev/null
+fi
 
-echo "== [6/7] Cloud Tasks queue + Pub/Sub topic =="
+echo "== [7/8] Cloud Tasks queue + Pub/Sub topic =="
 gcloud tasks queues create webpilot-runs --project "$PROJECT_ID" --location="$REGION" 2>&1 | grep -v "already exist" || true
 gcloud pubsub topics create webpilot-events --project "$PROJECT_ID" 2>&1 | grep -v "already exist" || true
 
-echo "== [7/7] Artifact Registry repo for Docker images =="
+echo "== [8/8] Artifact Registry repo for Docker images =="
 gcloud artifacts repositories create webpilot --project "$PROJECT_ID" --location="$REGION" --repository-format=docker 2>&1 | grep -v "already exist" || true
 
 echo ""
