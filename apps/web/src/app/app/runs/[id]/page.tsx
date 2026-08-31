@@ -30,6 +30,57 @@ import { api } from "../../../../lib/api";
 import { cleanAgentTitle } from "../../../../components/ScheduleModal";
 import { useToast } from "../../../../components/Toast";
 
+// Several extraction schema fields carry a JSON-encoded array/object
+// serialized into a plain "string" field (the platform's ExtractionSchema
+// has no nested object/array-of-object type), so the raw value is often a
+// wall of escaped JSON text. Parse and render it as a small structured
+// list instead of dumping the escaped string verbatim.
+function SmartValue({ value }: { value: string }) {
+  if (!value) return <span className="text-slate-500">—</span>;
+  const trimmed = value.trim();
+  let parsed: any = null;
+  if (trimmed.startsWith("[") || trimmed.startsWith("{")) {
+    try {
+      parsed = JSON.parse(trimmed);
+    } catch {
+      parsed = null;
+    }
+  }
+  const renderEntries = (obj: Record<string, any>) => (
+    <div className="space-y-0.5">
+      {Object.entries(obj).map(([k, v]) => (
+        <div key={k} className="flex gap-1.5 text-[11px] leading-relaxed">
+          <span className="text-slate-500 font-semibold shrink-0">{k}:</span>
+          <span className="text-slate-200 break-words">{String(v)}</span>
+        </div>
+      ))}
+    </div>
+  );
+  if (Array.isArray(parsed)) {
+    if (parsed.length === 0) return <span className="text-slate-500">—</span>;
+    if (parsed[0] && typeof parsed[0] === "object") {
+      return (
+        <div className="space-y-1.5">
+          {parsed.map((item, i) => (
+            <div key={i} className="rounded-lg border border-slate-800 bg-slate-900/60 p-2">
+              {renderEntries(item)}
+            </div>
+          ))}
+        </div>
+      );
+    }
+    return (
+      <ul className="list-disc list-inside space-y-0.5 text-slate-200">
+        {parsed.map((item, i) => (
+          <li key={i}>{String(item)}</li>
+        ))}
+      </ul>
+    );
+  }
+  if (parsed && typeof parsed === "object") return renderEntries(parsed);
+  return <span className="whitespace-pre-wrap break-words">{value}</span>;
+}
+
 export default function RunInspector() {
   const toast = useToast();
   const { id } = useParams<{ id: string }>();
@@ -435,7 +486,7 @@ export default function RunInspector() {
                           <td className="p-3.5 font-bold text-white">{f.name}</td>
                           {res.extracted ? (
                             <td className="p-3.5 font-medium text-emerald-300 bg-emerald-500/5 rounded-lg border border-emerald-500/20">
-                              {res.value}
+                              <SmartValue value={res.value || ""} />
                             </td>
                           ) : isInProgress ? (
                             <td className="p-3.5 font-medium text-amber-300 bg-amber-500/10 rounded-lg border border-amber-500/20 flex items-center gap-2 animate-pulse">
@@ -487,8 +538,8 @@ export default function RunInspector() {
                       <tr key={idx} className="hover:bg-slate-900/50 transition-colors">
                         <td className="p-3 text-center font-mono text-slate-500 font-bold">{idx + 1}</td>
                         {Object.keys(records[0]).map((k) => (
-                          <td key={k} className="p-3 align-top max-w-xs truncate">
-                            {String(rec[k] ?? "")}
+                          <td key={k} className="p-3 align-top max-w-xs max-h-48 overflow-y-auto">
+                            <SmartValue value={String(rec[k] ?? "")} />
                           </td>
                         ))}
                       </tr>

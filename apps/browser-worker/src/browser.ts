@@ -183,7 +183,23 @@ export async function extractRecords(page: Page, schema: ExtractionSchema, maxCo
     }, { fields: schema.fields as any, maxLimit: maxCount });
 
     if (Array.isArray(rawRecords) && rawRecords.length > 0) {
-      return rawRecords;
+      // A schema whose field names don't match any of the recognized
+      // buckets above (url/price/rating/rank/name/spec) falls through to
+      // the generic "else" branch for every field, which has no real
+      // per-field signal to offer and just repeats the same one fallback
+      // string into every field -- e.g. a report-style schema
+      // (comparisonReport, mismatchesFound, ...) against a container-based
+      // heuristic built for product-listing rows. That produces a
+      // "record" that is technically non-empty but semantically the same
+      // silent-garbage-marked-as-success problem the no-container throw
+      // below already guards against. Drop any record where every field
+      // collapsed to the identical value, and treat "nothing genuine
+      // survived" the same as "no containers found".
+      const genuine = rawRecords.filter((rec: Record<string, any>) => {
+        const vals = Object.values(rec);
+        return vals.length <= 1 || !vals.every((v) => v === vals[0]);
+      });
+      if (genuine.length > 0) return genuine;
     }
   } catch (err) {
     console.warn("[EXTRACT_RECORDS ERROR]:", err);
