@@ -71,6 +71,14 @@ grant "$API_SA" roles/cloudtasks.enqueuer
 grant "$API_SA" roles/cloudscheduler.admin
 grant "$API_SA" roles/secretmanager.secretAccessor
 grant "$API_SA" roles/pubsub.publisher
+grant "$API_SA" roles/aiplatform.user
+# Firebase Admin's createCustomToken() (email/password login session bridge)
+# needs the API's own service account to be able to sign blobs for itself
+# via the IAM Credentials API -- this is NOT implied by any of the roles
+# above and is not automatic on Cloud Run, despite using the same identity.
+gcloud iam service-accounts add-iam-policy-binding "$API_SA" \
+  --member="serviceAccount:$API_SA" --role="roles/iam.serviceAccountTokenCreator" \
+  --project "$PROJECT_ID" >/dev/null
 grant "$WORKER_SA" roles/cloudsql.client
 grant "$WORKER_SA" roles/aiplatform.user
 grant "$WORKER_SA" roles/storage.objectAdmin
