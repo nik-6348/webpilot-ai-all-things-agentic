@@ -25,27 +25,38 @@ SCHED_SA="webpilot-scheduler-invoker@${PROJECT_ID}.iam.gserviceaccount.com"
 PUBSUB_SA="webpilot-pubsub-invoker@${PROJECT_ID}.iam.gserviceaccount.com"
 
 SHA=$(git rev-parse --short HEAD)
-FIREBASE_KEY="${NEXT_PUBLIC_FIREBASE_API_KEY:?set NEXT_PUBLIC_FIREBASE_API_KEY}"
-FIREBASE_DOMAIN="${NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN:-${PROJECT_ID}.firebaseapp.com}"
 
-echo "== Configuring docker auth for Artifact Registry =="
-gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
+# SKIP_BUILD=true reuses images already built+pushed by
+# scripts/cloudbuild-images.yaml (Cloud Build has much better network
+# throughput to the npm registry than local Docker Desktop does on this
+# machine — a single local `pnpm install` inside the api image took 20+
+# minutes vs ~11s on Cloud Build). Same script either way; this just skips
+# redoing work that's already done.
+if [ "${SKIP_BUILD:-false}" != "true" ]; then
+  FIREBASE_KEY="${NEXT_PUBLIC_FIREBASE_API_KEY:?set NEXT_PUBLIC_FIREBASE_API_KEY}"
+  FIREBASE_DOMAIN="${NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN:-${PROJECT_ID}.firebaseapp.com}"
 
-echo "== Building images (tag: $SHA) =="
-docker build -f docker/api.Dockerfile      -t "$REPO/api:$SHA"      .
-docker build -f docker/worker.Dockerfile   -t "$REPO/worker:$SHA"   .
-docker build -f docker/notifier.Dockerfile -t "$REPO/notifier:$SHA" .
-docker build -f docker/demo.Dockerfile     -t "$REPO/demo:$SHA"     .
-docker build -f docker/web.Dockerfile \
-  --build-arg NEXT_PUBLIC_FIREBASE_API_KEY="$FIREBASE_KEY" \
-  --build-arg NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN="$FIREBASE_DOMAIN" \
-  --build-arg NEXT_PUBLIC_FIREBASE_PROJECT_ID="$PROJECT_ID" \
-  -t "$REPO/web:$SHA" .
+  echo "== Configuring docker auth for Artifact Registry =="
+  gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
 
-echo "== Pushing images =="
-for image in api worker notifier demo web; do
-  docker push "$REPO/$image:$SHA"
-done
+  echo "== Building images (tag: $SHA) =="
+  docker build -f docker/api.Dockerfile      -t "$REPO/api:$SHA"      .
+  docker build -f docker/worker.Dockerfile   -t "$REPO/worker:$SHA"   .
+  docker build -f docker/notifier.Dockerfile -t "$REPO/notifier:$SHA" .
+  docker build -f docker/demo.Dockerfile     -t "$REPO/demo:$SHA"     .
+  docker build -f docker/web.Dockerfile \
+    --build-arg NEXT_PUBLIC_FIREBASE_API_KEY="$FIREBASE_KEY" \
+    --build-arg NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN="$FIREBASE_DOMAIN" \
+    --build-arg NEXT_PUBLIC_FIREBASE_PROJECT_ID="$PROJECT_ID" \
+    -t "$REPO/web:$SHA" .
+
+  echo "== Pushing images =="
+  for image in api worker notifier demo web; do
+    docker push "$REPO/$image:$SHA"
+  done
+else
+  echo "== SKIP_BUILD=true — reusing images already pushed for tag $SHA =="
+fi
 
 echo "== Running migration (Cloud Run Job) =="
 if gcloud run jobs describe webpilot-migrate --region "$REGION" --project "$PROJECT_ID" >/dev/null 2>&1; then
