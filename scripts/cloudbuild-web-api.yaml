@@ -1,0 +1,24 @@
+substitutions:
+  _REPO: us-central1-docker.pkg.dev/webpilot-ai-hackathon/webpilot
+  _SHA: latest
+
+steps:
+  - id: build-and-push
+    name: gcr.io/cloud-builders/docker
+    entrypoint: bash
+    args:
+      - -ceu
+      - |
+        docker build -f docker/api.Dockerfile -t "${_REPO}/api:${_SHA}" .
+        docker build -f docker/web.Dockerfile \
+          --build-arg NEXT_PUBLIC_FIREBASE_API_KEY="AIzaSyAjYiyYwaBUSHDA0cqJ-SZ9psyCcatagY8" \
+          --build-arg NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN="webpilot-ai-hackathon.firebaseapp.com" \
+          --build-arg NEXT_PUBLIC_FIREBASE_PROJECT_ID="webpilot-ai-hackathon" \
+          -t "${_REPO}/web:${_SHA}" .
+        docker push "${_REPO}/api:${_SHA}"
+        docker push "${_REPO}/web:${_SHA}"
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+  machineType: E2_HIGHCPU_8
+timeout: 1800s
