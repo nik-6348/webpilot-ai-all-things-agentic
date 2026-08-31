@@ -5,6 +5,29 @@ import { requireWorkspace, audit } from "../common/context.js";
 import { compileAuditArtifact } from "@webpilot/workflow-engine";
 import { Public } from "../common/public.decorator.js";
 import { z } from "zod";
+import crypto from "node:crypto";
+
+// Short-lived HMAC-signed artifact access, scoped to one exact run+path.
+// The artifact endpoint has to stay reachable without an Authorization
+// header (an <img src="..."> tag can't send one), but it must never again
+// be a bare public/unscoped endpoint (that was the original IDOR). A
+// signature can only be minted by an already-authenticated call to
+// GET /runs/:id (which calls requireWorkspace first), is bound to the
+// exact runId+path it was issued for, and expires in 15 minutes.
+function signArtifactAccess(runId: string, path: string, expiresAt: number): string {
+  const key = process.env.INTERNAL_WORKER_TOKEN || "";
+  return crypto
+    .createHmac("sha256", key)
+    .update(`${runId}:${path}:${expiresAt}`)
+    .digest("hex");
+}
+function verifyArtifactAccess(runId: string, path: string, expiresAt: number, sig: string): boolean {
+  const key = process.env.INTERNAL_WORKER_TOKEN || "";
+  if (!key || !expiresAt || !sig || Date.now() > expiresAt) return false;
+  const expected = Buffer.from(signArtifactAccess(runId, path, expiresAt));
+  const actual = Buffer.from(sig);
+  return expected.length === actual.length && crypto.timingSafeEqual(expected, actual);
+}
 
 const Start = z.object({
   agentId: z.string(),
@@ -97,7 +120,14 @@ export class RunsController {
     const toPublicUrl = (ref?: string) => {
       if (!ref) return null;
       if (ref.startsWith("http://") || ref.startsWith("https://")) return ref;
-      return `${apiBase}/api/v1/runs/${run.id}/artifact?path=${encodeURIComponent(ref)}`;
+      // Signed, short-lived, scoped to this exact run+path — see
+      // signArtifactAccess above. This call is already behind
+      // requireWorkspace (below), so minting a signature here is the one
+      // and only authorization check; the artifact endpoint itself trusts
+      // any signature that verifies.
+      const expiresAt = Date.now() + 15 * 60_000;
+      const sig = signArtifactAccess(run.id, ref, expiresAt);
+      return `${apiBase}/api/v1/runs/${run.id}/artifact?path=${encodeURIComponent(ref)}&exp=${expiresAt}&sig=${sig}`;
     };
 
     const formattedEvents = run.events.map((evt: any) => {
@@ -183,22 +213,30 @@ export class RunsController {
     return prisma.run.update({ where: { id }, data: { status: "CANCELLED" } });
   }
 
+  @Public()
   @Get(":id/artifact") async getArtifact(
     @Req() req: any,
     @Param("id") id: string,
     @Query("path") artifactPath: string,
+    @Query("exp") exp: string,
+    @Query("sig") sig: string,
     @Res() res: any,
   ) {
     const run = await prisma.run.findUnique({ where: { id } });
     if (!run) return res.status(404).send("Run not found");
-
-    await requireWorkspace(req.user.id, run.workspaceId);
 
     if (!artifactPath) return res.status(400).send("Path query parameter required");
     // Artifact paths must belong to this run — never trust a client-supplied
     // path into another run/agent's artifacts (was a public, unscoped IDOR).
     if (!artifactPath.startsWith(`runs/${id}/`))
       return res.status(403).send("Artifact does not belong to this run");
+
+    // This route has to be reachable without an Authorization header
+    // (rendered via <img src>), so a valid signature — minted only by an
+    // already-authorized call to GET /runs/:id — is the authorization
+    // check here, not a session.
+    if (!verifyArtifactAccess(id, artifactPath, Number(exp), sig))
+      return res.status(403).send("Invalid or expired artifact link");
 
     const store = new ArtifactStore();
     try {
