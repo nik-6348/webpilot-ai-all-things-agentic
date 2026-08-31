@@ -125,6 +125,13 @@ export class TaskQueue {
               new URL(process.env.WORKER_URL!).origin,
           },
           headers: { "Content-Type": "application/json" },
+          // Cloud Tasks sends a zero-byte body by default -- Fastify's
+          // JSON body parser rejects that outright ("Body cannot be empty
+          // when content-type is set to 'application/json'") before the
+          // route handler ever runs, so every real (non-LOCAL_TASKS)
+          // dispatch 400'd. The handler only needs runId from the URL, so
+          // an empty JSON object is enough to satisfy the parser.
+          body: Buffer.from(JSON.stringify({})),
         },
       },
     });
