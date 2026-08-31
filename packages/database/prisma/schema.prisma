@@ -66,6 +66,7 @@ model Workspace {
   integrations Integration[]
   connections  Connection[]
   schedules    Schedule[]
+  settings     WorkspaceSetting?
   createdAt    DateTime          @default(now()) @map("created_at")
   updatedAt    DateTime          @updatedAt @map("updated_at")
 
@@ -308,6 +309,7 @@ model AuditLog {
 
 model WorkspaceSetting {
   workspaceId              String   @id @map("workspace_id")
+  workspace                Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   defaultModel             String   @default("gemini-3.7-flash") @map("default_model")
   maxRunDuration           Int      @default(600) @map("max_run_duration")
   maxRecoveryAttempts      Int      @default(3) @map("max_recovery_attempts")
