@@ -27,22 +27,39 @@ That last row is the core bet: self-healing isn't "just retry with AI" — it's 
 
 ## Feature highlights
 
-- 🧠 **Teach once, replay free** — Google ADK Planner + live Navigator learn a task against a real browser; every healthy repeat run costs zero Gemini calls.
-- 🩹 **Self-healing, not self-guessing** — a failed step never just retries; it goes through diagnose → patch → sandbox replay → independent verifier → versioned promotion → resume, all recorded and inspectable.
-- 🔒 **Nothing the model writes ever executes** — the learned workflow is a typed, validated spec. No `eval()`, no `new Function()`, model output is data, never code.
-- 🛑 **Humans stay in the loop** — plan approval, high-risk-action approval, recovery approval, and CAPTCHA/human-verification checkpoints all pause the run for a real person.
-- 🏗️ **Actually deployed on Google Cloud** — Cloud Run (5 services), Cloud SQL, Cloud Tasks, Pub/Sub, Secret Manager, Artifact Registry, least-privilege IAM per service — not just described, [live right now](#live-deployment).
-- 📦 **Immutable versions** — every learned or healed workflow is a new version; nothing is overwritten, everything is auditable and rollback-able.
-- 🔔 **Notifications where your team already is** — Slack (OAuth + signed slash commands), Gmail API, Google Chat.
+- **Teach once, replay free** — Google ADK Planner + live Navigator learn a task against a real browser; every healthy repeat run costs zero Gemini calls.
+- **Self-healing, not self-guessing** — a failed step never just retries; it goes through diagnose → patch → sandbox replay → independent verifier → versioned promotion → resume, all recorded and inspectable.
+- **Nothing the model writes ever executes** — the learned workflow is a typed, validated spec. No `eval()`, no `new Function()`, model output is data, never code.
+- **Humans stay in the loop** — plan approval, high-risk-action approval, recovery approval, and CAPTCHA/human-verification checkpoints all pause the run for a real person.
+- **Actually deployed on Google Cloud** — Cloud Run (5 services), Cloud SQL, Cloud Tasks, Pub/Sub, Secret Manager, Artifact Registry, least-privilege IAM per service — not just described, [live right now](#live-deployment).
+- **Immutable versions** — every learned or healed workflow is a new version; nothing is overwritten, everything is auditable and rollback-able.
+- **Notifications where your team already is** — Slack (OAuth + signed slash commands), Gmail API, Google Chat.
+
+## Example: a real run, including a real recovery
+
+This is an actual run from the live deployment, not a scripted demo.
+
+**Problem.** Agent goal: *"open flipkart and find the top 5 highest expensive phones."* During discovery, the Navigator's second step waited for a bot-verification prompt ("Are you a human?") that happened to be showing when the workflow was learned. On the very next run, Flipkart didn't show that prompt — the step's locator had nothing to match, and the run failed.
+
+**Solution.** Fast Path failed on step 2 with a locator-not-found error. WebPilot captured the DOM and a screenshot at the point of failure and handed both to the Recovery agent, which diagnosed the real condition (the page was already loaded; there was no verification screen) and proposed a one-line fix: wait for a normal homepage element ("Mobiles") instead. The patch was replayed against a sandboxed browser context, then checked by a second, independent Gemini call with no visibility into how the first one reasoned. It passed with 0.95 confidence. Because the change was classified low-risk, it was promoted automatically — no human was paged.
+
+**Outcome.** A new version (`v1.2`) was created in under 10 seconds, and the *same run* resumed and completed — 5 phones extracted, sorted correctly by price, in one continuous execution the end user never saw interrupted. Every subsequent run replays `v1.2` with zero Gemini calls, until the site changes again.
+
+| | Before recovery | After recovery |
+|---|---|---|
+| Step 2 waits for | `"Are you a human?"` (assumed present) | `"Mobiles"` (a real homepage element) |
+| Result | Run fails | Run completes, same execution |
+| Verifier confidence | — | 0.95 |
+| Human involved | — | No (auto-promoted, low risk) |
 
 ## Architecture
 
 ```mermaid
 flowchart TD
-    U["👤 User"] -->|"natural-language goal"| WEB["Next.js Web<br/>Cloud Run"]
+    U["User"] -->|"natural-language goal"| WEB["Next.js Web<br/>Cloud Run"]
     WEB -->|"REST"| API["NestJS + Fastify API<br/>Cloud Run"]
 
-    API -->|"plan request"| GEMINI["✨ Gemini 3.7 Flash<br/>via Google ADK / Vertex AI"]
+    API -->|"plan request"| GEMINI["Gemini 3.7 Flash<br/>via Google ADK / Vertex AI"]
     API -->|"persist"| SQL[("Cloud SQL<br/>PostgreSQL")]
     API -->|"dispatch run"| TASKS["Cloud Tasks"]
     API -.->|"secrets by reference"| SECRETS[("Secret Manager")]
@@ -50,17 +67,17 @@ flowchart TD
     TASKS -->|"OIDC-authenticated"| WORKER["Browser Worker<br/>Playwright · Cloud Run (private)"]
 
     WORKER -->|"learn / heal"| GEMINI
-    WORKER -->|"deterministic replay<br/>(0 Gemini calls)"| SITE["🌐 Target Website"]
+    WORKER -->|"deterministic replay<br/>(0 Gemini calls)"| SITE["Target Website"]
     WORKER -->|"screenshots · DOM · results"| GCS[("Cloud Storage")]
     WORKER -->|"run events"| SQL
     WORKER -->|"operational events"| PUBSUB["Pub/Sub"]
 
     PUBSUB --> NOTIFIER["Notifier<br/>Cloud Run (private)"]
-    NOTIFIER --> SLACK["💬 Slack"]
-    NOTIFIER --> GMAIL["✉️ Gmail"]
-    NOTIFIER --> CHAT["🗨️ Google Chat"]
+    NOTIFIER --> SLACK["Slack"]
+    NOTIFIER --> GMAIL["Gmail"]
+    NOTIFIER --> CHAT["Google Chat"]
 
-    DEMO["Demo Portal<br/>V1 ⇄ V2 DOM drift"] -.->|"triggers self-heal demo"| WORKER
+    DEMO["Demo Portal<br/>V1 to V2 DOM drift"] -.->|"triggers self-heal demo"| WORKER
 
     classDef gcp fill:#4285F4,stroke:#1a56c4,color:#fff
     classDef ai fill:#8E24AA,stroke:#5e1877,color:#fff
