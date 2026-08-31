@@ -367,7 +367,6 @@ export class AgentsController {
       "OWNER",
       "ADMIN",
       "OPERATOR",
-      "VIEWER",
     ]);
 
     await prisma.$transaction([

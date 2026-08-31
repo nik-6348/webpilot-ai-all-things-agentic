@@ -14,7 +14,7 @@ const AddMemberSchema = z.object({
   email: z.string().email(),
   displayName: z.string().optional(),
   role: z.enum(["OWNER", "ADMIN", "OPERATOR", "VIEWER"]).default("OPERATOR"),
-  password: z.string().optional(),
+  password: z.string().min(8).optional(),
 });
 
 const UpdateStatusSchema = z.object({
@@ -24,7 +24,7 @@ const UpdateStatusSchema = z.object({
 
 const SetPasswordSchema = z.object({
   workspaceId: z.string().optional(),
-  password: z.string().min(4),
+  password: z.string().min(8),
 });
 
 @Controller("workspaces")

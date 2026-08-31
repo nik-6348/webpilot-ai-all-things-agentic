@@ -11,6 +11,7 @@ import { prisma } from "@webpilot/database";
 import { Public } from "../common/public.decorator.js";
 import { z } from "zod";
 import crypto from "node:crypto";
+import { getAuth } from "firebase-admin/auth";
 import { EmailService } from "./email.service.js";
 
 const LoginEmailSchema = z.object({
@@ -23,11 +24,27 @@ const SignupRequestSchema = z.object({
   email: z.string().email(),
   workspaceName: z.string().optional(),
   reason: z.string().optional(),
-  password: z.string().optional(),
+  password: z.string().min(8).optional(),
 });
 
+// scrypt with a random per-user salt, stored as "salt:hash" — replaces a
+// previous unsalted SHA-256 scheme that shared one hardcoded salt across
+// every deployment.
 function hashPassword(password: string): string {
-  return crypto.createHash("sha256").update(password + ":webpilot_salt_2026").digest("hex");
+  const salt = crypto.randomBytes(16).toString("hex");
+  const hash = crypto.scryptSync(password, salt, 64).toString("hex");
+  return `${salt}:${hash}`;
+}
+
+function verifyPassword(password: string, stored: string): boolean {
+  const [salt, hash] = stored.split(":");
+  if (!salt || !hash) return false;
+  const candidate = crypto.scryptSync(password, salt, 64);
+  const expected = Buffer.from(hash, "hex");
+  return (
+    candidate.length === expected.length &&
+    crypto.timingSafeEqual(candidate, expected)
+  );
 }
 
 export { hashPassword };
@@ -73,12 +90,24 @@ export class AuthController {
       throw new UnauthorizedException("Email/password login not enabled for this account. Please use Google Login.");
     }
 
-    const inputHash = hashPassword(password);
-    if (user.passwordHash !== inputHash) {
+    if (!verifyPassword(password, user.passwordHash)) {
       throw new UnauthorizedException("Invalid email or password");
     }
 
+    // Mint a real Firebase session so the frontend can call every other
+    // API route the normal way (Authorization: Bearer <idToken>). Password
+    // login previously returned a bare JSON object with no session at all,
+    // so every subsequent request 401'd and the user was silently bounced
+    // back to /login.
+    let customToken: string | undefined;
+    if (process.env.LOCAL_AUTH_BYPASS !== "true") {
+      customToken = await getAuth().createCustomToken(user.identityProviderUid, {
+        email: user.email,
+      });
+    }
+
     return {
+      customToken,
       user: {
         id: user.id,
         email: user.email,

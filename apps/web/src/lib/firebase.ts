@@ -4,6 +4,7 @@ import {
   getAuth,
   GoogleAuthProvider,
   signInWithPopup,
+  signInWithCustomToken,
   signOut,
   type Auth,
 } from "firebase/auth";
@@ -45,6 +46,12 @@ export async function googleLogin() {
   if (!auth) return null;
   const provider = new GoogleAuthProvider();
   return signInWithPopup(auth, provider);
+}
+
+export async function loginWithCustomToken(token: string) {
+  const auth = getFirebaseAuth();
+  if (!auth) return null;
+  return signInWithCustomToken(auth, token);
 }
 
 export { signOut };

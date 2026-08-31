@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { Sparkles, ArrowRight, Lock, Mail, KeyRound, UserPlus, CheckCircle, ShieldCheck } from "lucide-react";
-import { googleLogin } from "../../lib/firebase";
+import { googleLogin, loginWithCustomToken } from "../../lib/firebase";
 import { api } from "../../lib/api";
 
 export default function Login() {
@@ -82,13 +82,16 @@ export default function Login() {
         body: JSON.stringify({ email, password }),
       });
 
-      if (res?.user) {
-        // Save local session hint
-        localStorage.setItem("webpilot_user", JSON.stringify(res.user));
-        router.push("/app");
-      } else {
-        throw new Error("Invalid credentials");
+      if (!res?.user) throw new Error("Invalid credentials");
+
+      // Establish a real Firebase session so every subsequent API call
+      // carries a valid Authorization header — previously this only stored
+      // a local hint that nothing ever read, and the very next request
+      // would 401 and silently bounce back here.
+      if (res.customToken) {
+        await loginWithCustomToken(res.customToken);
       }
+      router.push("/app");
     } catch (e: any) {
       setErr(e.message || "Email/password login failed");
     } finally {

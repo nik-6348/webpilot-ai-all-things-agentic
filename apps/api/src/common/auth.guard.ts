@@ -47,16 +47,28 @@ export class AuthGuard implements CanActivate {
       name = token.name;
       picture = token.picture;
     }
-    const user = await prisma.user.upsert({
-      where: { identityProviderUid: uid },
-      update: { email, displayName: name, avatarUrl: picture },
-      create: {
-        identityProviderUid: uid,
-        email,
-        displayName: name,
-        avatarUrl: picture,
-      },
-    });
+    // Users can be pre-created (workspace "Add Member", or an approved
+    // onboarding request) with a synthetic identityProviderUid before they
+    // ever sign in via Firebase. Upserting on identityProviderUid alone
+    // would then try to CREATE a second row on first real sign-in and crash
+    // on the unique email constraint. Reconcile by email first.
+    const existingByEmail = await prisma.user.findUnique({ where: { email } });
+    const user =
+      existingByEmail && existingByEmail.identityProviderUid !== uid
+        ? await prisma.user.update({
+            where: { id: existingByEmail.id },
+            data: { identityProviderUid: uid, displayName: name, avatarUrl: picture },
+          })
+        : await prisma.user.upsert({
+            where: { identityProviderUid: uid },
+            update: { email, displayName: name, avatarUrl: picture },
+            create: {
+              identityProviderUid: uid,
+              email,
+              displayName: name,
+              avatarUrl: picture,
+            },
+          });
     req.user = user;
     return true;
   }

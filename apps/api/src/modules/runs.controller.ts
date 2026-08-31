@@ -183,7 +183,6 @@ export class RunsController {
     return prisma.run.update({ where: { id }, data: { status: "CANCELLED" } });
   }
 
-  @Public()
   @Get(":id/artifact") async getArtifact(
     @Req() req: any,
     @Param("id") id: string,
@@ -192,16 +191,14 @@ export class RunsController {
   ) {
     const run = await prisma.run.findUnique({ where: { id } });
     if (!run) return res.status(404).send("Run not found");
-    
-    if (req.user?.id) {
-      try {
-        await requireWorkspace(req.user.id, run.workspaceId);
-      } catch (e) {
-        // Allow public image viewing for run viewport captures
-      }
-    }
+
+    await requireWorkspace(req.user.id, run.workspaceId);
 
     if (!artifactPath) return res.status(400).send("Path query parameter required");
+    // Artifact paths must belong to this run — never trust a client-supplied
+    // path into another run/agent's artifacts (was a public, unscoped IDOR).
+    if (!artifactPath.startsWith(`runs/${id}/`))
+      return res.status(403).send("Artifact does not belong to this run");
 
     const store = new ArtifactStore();
     try {
