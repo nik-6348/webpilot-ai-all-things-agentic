@@ -8,6 +8,7 @@ import {
   Param,
   Query,
   Req,
+  Res,
 } from "@nestjs/common";
 import crypto from "node:crypto";
 import { prisma } from "@webpilot/database";
@@ -109,8 +110,26 @@ export class IntegrationsController {
   @Public() @Get("slack/callback") async callback(
     @Query("code") code: string,
     @Query("state") state: string,
+    @Res() res: any,
   ) {
-    const workspaceId = verifyState(state);
+    // The web app's own origin -- CORS_ORIGINS is already the one place
+    // that's set to it in production. Falls through cleanly to a JSON
+    // response for local/dev environments where no web origin is
+    // configured, instead of redirecting to nothing.
+    const webUrl = (process.env.CORS_ORIGINS || "").split(",")[0]?.trim();
+    const redirectTo = (ok: boolean, reason?: string) => {
+      if (!webUrl) return res.send({ ok, reason });
+      const url = `${webUrl}/app/integrations?slack=${ok ? "connected" : "error"}${reason ? `&reason=${encodeURIComponent(reason)}` : ""}`;
+      return res.redirect(url);
+    };
+
+    let workspaceId: string;
+    try {
+      workspaceId = verifyState(state);
+    } catch (e: any) {
+      return redirectTo(false, e.message);
+    }
+
     const r = await fetch("https://slack.com/api/oauth.v2.access", {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -122,7 +141,8 @@ export class IntegrationsController {
       }),
     });
     const data: any = await r.json();
-    if (!data.ok) throw new Error(data.error);
+    if (!data.ok) return redirectTo(false, data.error);
+
     const ref = await new SecretVault().put(
       `slack-${workspaceId}`,
       JSON.stringify({ accessToken: data.access_token }),
@@ -144,7 +164,7 @@ export class IntegrationsController {
         secretManagerRef: ref,
       },
     });
-    return { ok: true, workspaceId };
+    return redirectTo(true);
   }
   @Public() @Post("slack/command") async command(
     @Req() req: any,
