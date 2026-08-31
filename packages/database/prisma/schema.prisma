@@ -46,6 +46,8 @@ model User {
   email               String            @unique
   displayName         String?           @map("display_name")
   avatarUrl           String?           @map("avatar_url")
+  passwordHash        String?           @map("password_hash")
+  isActive            Boolean           @default(true) @map("is_active")
   memberships         WorkspaceMember[]
   createdAt           DateTime          @default(now()) @map("created_at")
   updatedAt           DateTime          @updatedAt @map("updated_at")
@@ -305,13 +307,16 @@ model AuditLog {
 }
 
 model WorkspaceSetting {
-  workspaceId         String   @id @map("workspace_id")
-  defaultModel        String   @default("gemini-3.7-flash") @map("default_model")
-  maxRunDuration      Int      @default(600) @map("max_run_duration")
-  maxRecoveryAttempts Int      @default(3) @map("max_recovery_attempts")
-  retentionDays       Int      @default(30) @map("retention_days")
-  autoPromoteLowRisk  Boolean  @default(true) @map("auto_promote_low_risk")
-  updatedAt           DateTime @updatedAt @map("updated_at")
+  workspaceId              String   @id @map("workspace_id")
+  defaultModel             String   @default("gemini-3.7-flash") @map("default_model")
+  maxRunDuration           Int      @default(600) @map("max_run_duration")
+  maxRecoveryAttempts      Int      @default(3) @map("max_recovery_attempts")
+  retentionDays            Int      @default(30) @map("retention_days")
+  autoPromoteLowRisk       Boolean  @default(true) @map("auto_promote_low_risk")
+  allowGoogleLogin         Boolean  @default(true) @map("allow_google_login")
+  allowEmailPasswordLogin  Boolean  @default(true) @map("allow_email_password_login")
+  allowPublicOnboarding    Boolean  @default(true) @map("allow_public_onboarding")
+  updatedAt                DateTime @updatedAt @map("updated_at")
 
   @@map("workspace_settings")
 }

@@ -22,6 +22,7 @@
     "@webpilot/database": "workspace:*",
     "@webpilot/gcp": "workspace:*",
     "@webpilot/security": "workspace:*",
+    "@webpilot/workflow-engine": "workspace:*",
     "firebase-admin": "14.3.0",
     "google-auth-library": "11.0.2",
     "reflect-metadata": "0.2.2",

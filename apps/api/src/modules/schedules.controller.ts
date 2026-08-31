@@ -4,6 +4,7 @@ import {
   Delete,
   Get,
   Param,
+  Patch,
   Post,
   Query,
   Req,
@@ -90,6 +91,55 @@ export class SchedulesController {
     await new (await import("@webpilot/gcp")).TaskQueue().enqueueRun(run.id);
     return { ok: true, runId: run.id };
   }
+  @Post(":id/trigger-manual") async triggerManual(
+    @Req() req: any,
+    @Param("id") id: string,
+  ) {
+    const s = await prisma.schedule.findUniqueOrThrow({
+      where: { id },
+      include: { agent: true },
+    });
+    await requireWorkspace(req.user.id, s.workspaceId, [
+      "OWNER",
+      "ADMIN",
+      "OPERATOR",
+    ]);
+
+    const run = await prisma.run.create({
+      data: {
+        workspaceId: s.workspaceId,
+        agentId: s.agentId,
+        versionId: s.agent.activeVersionId,
+        triggerType: "SCHEDULE",
+        status: "QUEUED",
+        executionMode: s.agent.activeVersionId ? "FAST_PATH" : "DISCOVERY",
+        idempotencyKey: `manual-schedule-${s.id}-${Date.now()}`,
+      },
+    });
+
+    await new (await import("@webpilot/gcp")).TaskQueue().enqueueRun(run.id);
+    return { ok: true, runId: run.id };
+  }
+
+  @Patch(":id") async update(
+    @Req() req: any,
+    @Param("id") id: string,
+    @Body() body: any,
+  ) {
+    const s = await prisma.schedule.findUniqueOrThrow({ where: { id } });
+    await requireWorkspace(req.user.id, s.workspaceId, ["OWNER", "ADMIN"]);
+    return prisma.schedule.update({
+      where: { id },
+      data: {
+        ...(body.name !== undefined && { name: body.name }),
+        ...(body.cronExpression !== undefined && { cronExpression: body.cronExpression }),
+        ...(body.enabled !== undefined && { enabled: Boolean(body.enabled) }),
+        ...(body.timezone !== undefined && { timezone: body.timezone }),
+      },
+      include: { agent: true },
+    });
+  }
+
   @Delete(":id") async remove(@Req() req: any, @Param("id") id: string) {
     const s = await prisma.schedule.findUniqueOrThrow({ where: { id } });
     await requireWorkspace(req.user.id, s.workspaceId, ["OWNER", "ADMIN"]);

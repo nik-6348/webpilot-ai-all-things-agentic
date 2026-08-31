@@ -39,15 +39,62 @@ export async function assertSafeUrl(
   )
     throw new Error("Blocked host");
 
+  let rawList: any[] = [];
+  if (Array.isArray(allowedDomains)) {
+    rawList = allowedDomains;
+  } else if (typeof allowedDomains === "string") {
+    try {
+      const parsed = JSON.parse(allowedDomains);
+      rawList = Array.isArray(parsed) ? parsed : [allowedDomains];
+    } catch {
+      rawList = [allowedDomains];
+    }
+  }
+
+  const domains = rawList
+    .flatMap((item) => {
+      if (typeof item === "string" && item.trim().startsWith("[")) {
+        try {
+          const p = JSON.parse(item);
+          return Array.isArray(p) ? p : [item];
+        } catch {
+          return [item];
+        }
+      }
+      return [item];
+    })
+    .map((item) =>
+      String(item || "")
+        .replace(/[\[\]"']/g, "")
+        .trim(),
+    )
+    .filter(Boolean);
+
+  console.log(`[ASSERT_SAFE_URL] Checking url="${raw}", allowedDomains=`, JSON.stringify(allowedDomains));
+
   if (
-    allowedDomains?.length &&
-    !allowedDomains.some((d) => {
+    domains.length &&
+    !domains.some((d) => {
       if (d === "*" || d === "all") return true;
-      const clean = d.replace(/^\*\./, "").trim();
-      return url.hostname === clean || url.hostname.endsWith(`.${clean}`);
+      const parts = d
+        .replace(/^(https?:\/\/)?/i, "")
+        .split("/")[0] || "";
+      const clean = (parts.split(":")[0] || "")
+        .replace(/^\*\./, "")
+        .trim()
+        .toLowerCase();
+      if (!clean || clean === "*" || clean === "all") return true;
+      const host = url.hostname.toLowerCase();
+      return (
+        host === clean ||
+        host.endsWith(`.${clean}`) ||
+        clean.endsWith(`.${host}`)
+      );
     })
   ) {
-    throw new Error("Domain is outside approved boundary");
+    const msg = `Domain is outside approved boundary (target="${raw}", allowed=${JSON.stringify(allowedDomains)}, parsed=${JSON.stringify(domains)})`;
+    console.error(`[ASSERT_SAFE_URL FAILED] ${msg}`);
+    throw new Error(msg);
   }
 
   const answers = await dns.lookup(url.hostname, { all: true }).catch(() => []);

@@ -203,6 +203,7 @@ async function challengePause(runId: string, page: Page) {
 }
 
 export async function executeRun(runId: string) {
+  console.log(`[WORKER EXECUTE_RUN START] Executing runId="${runId}"`);
   const owner = `worker-${process.pid}-${crypto.randomUUID()}`;
   const now = new Date();
   const lease = new Date(Date.now() + 10 * 60_000);
@@ -214,7 +215,10 @@ export async function executeRun(runId: string) {
     },
     data: { leaseOwner: owner, leaseExpiresAt: lease, startedAt: now },
   });
-  if (!acquired.count) return { duplicate: true };
+  if (!acquired.count) {
+    console.warn(`[WORKER EXECUTE_RUN] RunId="${runId}" was already acquired or completed. Skipping duplicate execution.`);
+    return { duplicate: true };
+  }
   try {
     let run = await prisma.run.findUniqueOrThrow({
       where: { id: runId },
@@ -222,7 +226,10 @@ export async function executeRun(runId: string) {
     });
     const agent = run.agent;
     const allowed = agent.allowedDomains as string[];
+    console.log(`[WORKER EXECUTE_RUN] Fetched run details: agentId="${agent.id}", targetUrl="${agent.targetUrl}", rawAllowedDomains=`, JSON.stringify(agent.allowedDomains), `type=${typeof agent.allowedDomains}`);
+    console.log(`[WORKER EXECUTE_RUN] Running assertSafeUrl(targetUrl="${agent.targetUrl}", allowedDomains=`, JSON.stringify(allowed), `)`);
     await assertSafeUrl(agent.targetUrl, allowed);
+    console.log(`[WORKER EXECUTE_RUN] assertSafeUrl passed for agent targetUrl`);
     const credentials = await loadCredentials(agent);
     // If a recovery approval was granted, promote its referenced draft before resuming.
     const approvedRecovery = await prisma.approval.findFirst({
@@ -283,7 +290,8 @@ export async function executeRun(runId: string) {
 }
 
 async function createContext(allowed: string[]) {
-  const browser = await chromium.launch({ headless: true });
+  const isHeadless = process.env.HEADLESS !== "false";
+  const browser = await chromium.launch({ headless: isHeadless });
   const context = await browser.newContext();
   await installNetworkGuard(context);
   const page = await context.newPage();
@@ -320,15 +328,24 @@ async function discover(
   let extracted: any[] = [];
   try {
     await page.goto(run.agent.targetUrl, { waitUntil: "domcontentloaded" });
+    let lastActionSig = "";
+    let consecutiveIdenticalActions = 0;
+
     for (let i = 0; i < 25; i++) {
+      const stepStart = Date.now();
       if (await detectChallenge(page)) {
         await challengePause(runId, page);
         return { paused: true };
       }
       const dom = await compactDom(page);
-      const shot = (
-        await page.screenshot({ type: "jpeg", quality: 55 })
-      ).toString("base64");
+      const rawShot = await page.screenshot({ type: "jpeg", quality: 40 });
+      const shotRef = await artifacts.put(
+        `runs/${runId}/steps/step_${i + 1}.jpg`,
+        rawShot,
+        "image/jpeg",
+      );
+      const shot = rawShot.toString("base64");
+
       const decision = await modelCall(runId, "NAVIGATOR", () =>
         navigateDiscovery({
           goal: run.agent.goal,
@@ -339,35 +356,152 @@ async function discover(
           screenshotBase64: shot,
         }),
       );
-      const step = { ...decision.action, id: `step_${learned.length + 1}` };
+
+      let step = { ...decision.action, id: `step_${learned.length + 1}` };
+
+      // ANTI-LOOP REPETITION GUARD
+      const actionSig = `${step.type}:${step.locator?.value || ""}:${page.url()}`;
+      if (actionSig === lastActionSig) {
+        consecutiveIdenticalActions++;
+        if (consecutiveIdenticalActions >= 2) {
+          console.warn(`[ANTI-LOOP GUARD] Detected duplicate action "${actionSig}". Terminating loop.`);
+          break;
+        }
+      } else {
+        consecutiveIdenticalActions = 0;
+        lastActionSig = actionSig;
+      }
+
       if (step.type === "NAVIGATE" && step.url)
         await assertSafeUrl(step.url, allowed);
       if (await requiresApproval(runId, step)) return { paused: true };
-      const result = await executeStep(
-        page,
-        step,
-        credentials,
-        planned.extractionSchema,
-      );
+
+      let result: any;
+      try {
+        result = await executeStep(
+          page,
+          step,
+          credentials,
+          planned.extractionSchema,
+        );
+      } catch (stepErr: any) {
+        console.warn(`[STEP EXECUTION FAILED] ${stepErr.message}. Attempting AI Self-Healing...`);
+        try {
+          const patch = await modelCall(runId, "RECOVERY", () =>
+            recoverWorkflow({
+              goal: run.agent.goal,
+              workflow: planned,
+              failedStep: step,
+              error: String(stepErr.message || stepErr),
+              url: page.url(),
+              dom,
+              screenshotBase64: shot,
+            }),
+          );
+          if (patch?.replacement) {
+            step = { ...patch.replacement, id: step.id };
+            result = await executeStep(
+              page,
+              step,
+              credentials,
+              planned.extractionSchema,
+            );
+            console.log(`[SELF-HEALING SUCCESS] Executed replacement step: ${step.description}`);
+          }
+        } catch (healErr: any) {
+          console.warn(`[SELF-HEALING FAILED] ${healErr.message}`);
+        }
+      }
+
       learned.push(step);
-      await checkpoint(runId, step, i, "COMPLETED", { url: page.url() });
+
+      const durationMs = Date.now() - stepStart;
+      const durationStr = `${(durationMs / 1000).toFixed(2)}s`;
+
+      await event(
+        runId,
+        "STEP_COMPLETED",
+        `Step ${i + 1}: ${step.type} - ${step.description}`,
+        {
+          stepIndex: i + 1,
+          actionType: step.type,
+          durationMs,
+          duration: durationStr,
+          screenshot: shotRef,
+          url: page.url(),
+        },
+      );
+
+      await checkpoint(runId, step, i, "COMPLETED", {
+        durationMs,
+        duration: durationStr,
+        screenshot: shotRef,
+        url: page.url(),
+      });
+
       if (Array.isArray(result)) extracted = result;
       if (decision.done || step.type === "DONE") break;
     }
     if (!learned.length) throw new Error("Navigator produced no workflow");
+
+    // Validate schema validation BEFORE compiling/creating a PRODUCTION version of the agent
+    const schemaObj = planned.extractionSchema as any;
+    const fields = schemaObj?.fields || [];
+    const requiredFields = fields.filter((f: any) => f.required).map((f: any) => f.name || f.fieldName);
+    if (requiredFields.length > 0) {
+      let isValid = true;
+      let missingField = "";
+      if (!extracted || extracted.length === 0) {
+        isValid = false;
+        missingField = requiredFields.join(", ");
+      } else {
+        for (const reqField of requiredFields) {
+          const hasField = extracted.some(r => r && r[reqField] !== undefined && r[reqField] !== null && String(r[reqField]).trim().length > 0);
+          if (!hasField) {
+            isValid = false;
+            missingField = reqField;
+            break;
+          }
+        }
+      }
+      if (!isValid) {
+        throw new Error(`Schema validation failed: Required field '${missingField}' missing in extracted records`);
+      }
+    }
+
     const spec = WorkflowSpecSchema.parse({
       ...planned,
       startUrl: run.agent.targetUrl,
       allowedDomains: allowed,
       steps: learned,
     });
-    const artifact = await artifacts.put(
-      `agents/${run.agentId}/versions/v1.0/workflow.audit.js`,
-      compileAuditArtifact(spec),
-      "text/javascript",
-    );
-    const prod = await prisma.$transaction(
-      async (tx: Prisma.TransactionClient) => {
+
+    // Check if a PRODUCTION version already exists for this agent.
+    const existingProd = await prisma.agentVersion.findFirst({
+      where: { agentId: run.agentId, status: "PRODUCTION" },
+      orderBy: { createdAt: "desc" },
+    });
+
+    let prod: any;
+    if (existingProd) {
+      // EXISTING PRODUCTION VERSION: just use it as-is, no create, no update.
+      // "Rerun with Live AI" = fresh browser execution, SAME version stored.
+      console.log(`[DISCOVERY] Using existing PRODUCTION version "${existingProd.label}" for agentId="${run.agentId}" — no version changes`);
+      prod = existingProd;
+    } else {
+      // FIRST-TIME EVER: No PRODUCTION version exists → create the first one.
+      const latestVer = await prisma.agentVersion.findFirst({
+        where: { agentId: run.agentId },
+        orderBy: { createdAt: "desc" },
+      });
+      const newVersionLabel = nextVersionLabel(latestVer?.label || null, "DISCOVERY", false);
+      const artifact = await artifacts.put(
+        `agents/${run.agentId}/versions/${newVersionLabel}/workflow.audit.js`,
+        compileAuditArtifact(spec),
+        "text/javascript",
+      );
+      console.log(`[DISCOVERY] Creating first PRODUCTION version "${newVersionLabel}" for agentId="${run.agentId}"`);
+      prod = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
         await tx.agentVersion.updateMany({
           where: { agentId: run.agentId, status: "PRODUCTION" },
           data: { status: "ARCHIVED" },
@@ -375,7 +509,7 @@ async function discover(
         const v = await tx.agentVersion.create({
           data: {
             agentId: run.agentId,
-            label: "v1.0",
+            label: newVersionLabel,
             status: "PRODUCTION",
             source: "AI_DISCOVERY",
             parentVersionId: draft.id,
@@ -390,9 +524,9 @@ async function discover(
           data: { activeVersionId: v.id },
         });
         return v;
-      },
-    );
-    await complete(runId, prod.id, extracted, "DISCOVERY");
+      });
+    }
+    await complete(runId, prod.id, extracted, "DISCOVERY", spec.extractionSchema);
     return { ok: true, version: prod.label, records: extracted.length };
   } finally {
     await browser.close();
@@ -463,7 +597,7 @@ async function fast(
         );
       }
     }
-    await complete(runId, version.id, extracted, "FAST_PATH");
+    await complete(runId, version.id, extracted, "FAST_PATH", spec.extractionSchema);
     return { ok: true, records: extracted.length };
   } finally {
     await browser.close();
@@ -691,7 +825,52 @@ async function complete(
   versionId: string,
   records: any[],
   mode: string,
+  schema?: any,
 ) {
+  const fields = schema?.fields || [];
+  const requiredFields = fields.filter((f: any) => f.required).map((f: any) => f.name || f.fieldName);
+
+  let isValid = true;
+  let missingField = "";
+
+  if (requiredFields.length > 0) {
+    if (!records || records.length === 0) {
+      isValid = false;
+      missingField = requiredFields.join(", ");
+    } else {
+      for (const reqField of requiredFields) {
+        const hasField = records.some(r => r && r[reqField] !== undefined && r[reqField] !== null && String(r[reqField]).trim().length > 0);
+        if (!hasField) {
+          isValid = false;
+          missingField = reqField;
+          break;
+        }
+      }
+    }
+  }
+
+  if (!isValid) {
+    console.warn(`[SCHEMA VALIDATION FAILED] Run ${runId} missing required schema field '${missingField}'`);
+    await prisma.run.update({
+      where: { id: runId },
+      data: {
+        status: "FAILED",
+        errorCode: "SCHEMA_VALIDATION_FAILED",
+        errorMessage: `Schema validation failed: Required field '${missingField}' missing in extracted records`,
+        completedAt: new Date(),
+        leaseOwner: null,
+        leaseExpiresAt: null,
+      },
+    });
+    await event(
+      runId,
+      "RUN_FAILED",
+      `Schema validation failed: Required field '${missingField}' missing in extracted records`,
+      { missingField, recordsCount: records?.length || 0 },
+    );
+    return;
+  }
+
   const result = { records, count: records.length };
   const ref = await artifacts.put(
     `runs/${runId}/result.json`,

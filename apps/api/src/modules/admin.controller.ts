@@ -1,6 +1,6 @@
-import { Controller, Get, Patch, Query, Req, Body } from "@nestjs/common";
+import { Controller, Get, Patch, Post, Query, Req, Body } from "@nestjs/common";
 import { prisma } from "@webpilot/database";
-import { requireWorkspace } from "../common/context.js";
+import { requireWorkspace, audit } from "../common/context.js";
 import { z } from "zod";
 const Settings = z.object({
   defaultModel: z.string().optional(),
@@ -8,6 +8,9 @@ const Settings = z.object({
   maxRecoveryAttempts: z.number().int().min(0).max(5).optional(),
   retentionDays: z.number().int().min(7).max(365).optional(),
   autoPromoteLowRisk: z.boolean().optional(),
+  allowGoogleLogin: z.boolean().optional(),
+  allowEmailPasswordLogin: z.boolean().optional(),
+  allowPublicOnboarding: z.boolean().optional(),
 });
 @Controller()
 export class AdminController {
@@ -18,14 +21,72 @@ export class AdminController {
     const m = await requireWorkspace(req.user.id, workspaceId);
     const runs = await prisma.run.findMany({
       where: { workspaceId: m.workspaceId },
-      select: { status: true, executionMode: true, modelCallCount: true },
+      include: { agent: true },
+      orderBy: { createdAt: "desc" },
+      take: 100,
     });
+
+    const completed = runs.filter((r: any) => r.status === "COMPLETED");
+    const directScriptRuns = runs.filter((r: any) => r.executionMode === "FAST_PATH" || r.modelCallCount === 0);
+    const aiAgentRuns = runs.filter((r: any) => r.executionMode === "DISCOVERY" && r.modelCallCount > 0);
+
+    const getDurationSec = (r: any) => {
+      if (r.completedAt && r.startedAt) {
+        const d = (new Date(r.completedAt).getTime() - new Date(r.startedAt).getTime()) / 1000;
+        if (d > 0) return d;
+      }
+      if ((r.result as any)?.totalDurationSec) {
+        const parsed = parseFloat((r.result as any).totalDurationSec);
+        if (!isNaN(parsed) && parsed > 0) return parsed;
+      }
+      return 0;
+    };
+
+    const directScriptLatencies = directScriptRuns.map(getDurationSec).filter((d: number) => d > 0);
+    const aiAgentLatencies = aiAgentRuns.map(getDurationSec).filter((d: number) => d > 0);
+
+    const avgScriptLatVal = directScriptLatencies.length > 0
+      ? (directScriptLatencies.reduce((a: number, b: number) => a + b, 0) / directScriptLatencies.length)
+      : 0;
+
+    const avgAiLatVal = aiAgentLatencies.length > 0
+      ? (aiAgentLatencies.reduce((a: number, b: number) => a + b, 0) / aiAgentLatencies.length)
+      : 0;
+
+    const avgScriptLatStr = avgScriptLatVal > 0 ? `${avgScriptLatVal.toFixed(1)}s` : "--";
+    const avgAiLatStr = avgAiLatVal > 0 ? `${avgAiLatVal.toFixed(1)}s` : "--";
+
+    const speedupMultiplier = (avgScriptLatVal > 0 && avgAiLatVal > 0)
+      ? `${(avgAiLatVal / avgScriptLatVal).toFixed(1)}x`
+      : null;
+
+    const activeRun = runs.find((r: any) => ["IN_PROGRESS", "QUEUED", "WAITING_PLAN_APPROVAL"].includes(r.status));
+
     return {
-      runs: runs.length,
-      completed: runs.filter((r: any) => r.status === "COMPLETED").length,
-      fastPath: runs.filter((r: any) => r.executionMode === "FAST_PATH").length,
-      zeroLlm: runs.filter((r: any) => r.modelCallCount === 0).length,
-      modelCalls: runs.reduce((n: number, r: any) => n + r.modelCallCount, 0),
+      totalRuns: runs.length,
+      completedRuns: completed.length,
+      directScriptRunsCount: directScriptRuns.length,
+      aiAgentRunsCount: aiAgentRuns.length,
+      avgScriptLatStr,
+      avgAiLatStr,
+      speedupMultiplier,
+      successRate: runs.length > 0 ? ((completed.length / runs.length) * 100).toFixed(0) : "0",
+      activeRun: activeRun ? {
+        id: activeRun.id,
+        agentName: activeRun.agent?.name || "Autonomous Agent",
+        goal: activeRun.agent?.goal || activeRun.id,
+        status: activeRun.status,
+      } : null,
+      recentRuns: runs.slice(0, 10).map((r: any) => ({
+        id: r.id,
+        agentName: r.agent?.name || "Autonomous Scraper Agent",
+        goal: r.agent?.goal || r.id,
+        status: r.status,
+        executionMode: r.executionMode,
+        modelCallCount: r.modelCallCount,
+        durationSec: getDurationSec(r).toFixed(2),
+        createdAt: r.createdAt,
+      })),
     };
   }
   @Get("audit") async audit(
@@ -63,5 +124,54 @@ export class AdminController {
       where: { workspaceId: m.workspaceId },
       data: Settings.parse(body),
     });
+  }
+
+  @Post("purge") async purgeData(
+    @Req() req: any,
+    @Query("workspaceId") workspaceId: string,
+    @Body() body: { target: "RUNS" | "AGENTS" | "SCHEDULES" | "FACTORY_RESET"; retentionDays?: number },
+  ) {
+    const m = await requireWorkspace(req.user.id, workspaceId, ["OWNER"]);
+    const target = body?.target || "RUNS";
+    let count = 0;
+
+    if (target === "RUNS") {
+      const days = body.retentionDays || 30;
+      const cutoff = new Date(Date.now() - days * 86400 * 1000);
+      const oldRuns = await prisma.run.findMany({
+        where: { workspaceId: m.workspaceId, createdAt: { lt: cutoff } },
+        select: { id: true },
+      });
+      const ids = oldRuns.map((r: any) => r.id);
+      if (ids.length) {
+        await prisma.$transaction([
+          prisma.runEvent.deleteMany({ where: { runId: { in: ids } } }),
+          prisma.runStep.deleteMany({ where: { runId: { in: ids } } }),
+          prisma.approval.deleteMany({ where: { runId: { in: ids } } }),
+          prisma.modelInvocation.deleteMany({ where: { runId: { in: ids } } }),
+          prisma.run.deleteMany({ where: { id: { in: ids } } }),
+        ]);
+        count = ids.length;
+      }
+    } else if (target === "FACTORY_RESET") {
+      const allRuns = await prisma.run.findMany({ where: { workspaceId: m.workspaceId }, select: { id: true } });
+      const ids = allRuns.map((r: any) => r.id);
+      if (ids.length) {
+        await prisma.$transaction([
+          prisma.runEvent.deleteMany({ where: { runId: { in: ids } } }),
+          prisma.runStep.deleteMany({ where: { runId: { in: ids } } }),
+          prisma.approval.deleteMany({ where: { runId: { in: ids } } }),
+          prisma.modelInvocation.deleteMany({ where: { runId: { in: ids } } }),
+          prisma.run.deleteMany({ where: { workspaceId: m.workspaceId } }),
+        ]);
+      }
+      await prisma.schedule.deleteMany({ where: { workspaceId: m.workspaceId } });
+      await prisma.agentVersion.deleteMany({ where: { agent: { workspaceId: m.workspaceId } } });
+      await prisma.agent.deleteMany({ where: { workspaceId: m.workspaceId } });
+      count = ids.length;
+    }
+
+    await audit(m.workspaceId, req.user.id, `PURGE_${target}`, "workspace", m.workspaceId);
+    return { ok: true, target, purgedCount: count };
   }
 }

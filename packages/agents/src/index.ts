@@ -1,5 +1,6 @@
 import { InMemoryRunner, LlmAgent } from "@google/adk";
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenAI, Type, Schema } from "@google/genai";
+import { zodToJsonSchema } from "zod-to-json-schema";
 import {
   PlanSchema,
   BrowserDecisionSchema,
@@ -21,113 +22,94 @@ function extractCleanJson(text: string): string {
   return cleaned;
 }
 
+
+
 function normalizePlanJson(raw: any, input: { goal: string; targetUrl: string; allowedDomains: string[] }): any {
-  if (raw.summary && raw.workflow?.startUrl && Array.isArray(raw.workflow?.steps)) {
-    return raw;
+  const validStartUrl = input.targetUrl.startsWith("http") ? input.targetUrl : `https://${input.targetUrl}`;
+
+  const summary = String(raw.summary || raw.workflowName || raw.workflow?.goal || input.goal);
+  const startUrl = String(raw.workflow?.startUrl || raw.startUrl || validStartUrl);
+  
+  let rawSteps = raw.workflow?.steps || raw.steps || [];
+  let steps: any[] = [];
+
+  if (Array.isArray(rawSteps) && rawSteps.length > 0) {
+    steps = rawSteps.map((s: any, idx: number) => {
+      if (typeof s === "string") {
+        return {
+          id: `step_${idx + 1}`,
+          type: "NAVIGATE",
+          description: s,
+          url: startUrl,
+          risk: "LOW",
+        };
+      }
+      return {
+        id: String(s.id || `step_${idx + 1}`),
+        type: String(s.type || "NAVIGATE").toUpperCase(),
+        description: String(s.description || `Step ${idx + 1}`),
+        url: String(s.url || startUrl),
+        risk: ["LOW", "MEDIUM", "HIGH"].includes(s.risk) ? s.risk : "LOW",
+      };
+    });
+  } else {
+    steps = [
+      {
+        id: "step_1",
+        type: "NAVIGATE",
+        description: `Navigate to ${startUrl}`,
+        url: startUrl,
+        risk: "LOW",
+      },
+      {
+        id: "step_2",
+        type: "EXTRACT",
+        description: "Extract requested data",
+        risk: "LOW",
+      },
+    ];
   }
 
-  const startUrl = raw.workflow?.startUrl || raw.workflow?.targetUrl || raw.startUrl || raw.target_url || raw.targetUrl || input.targetUrl;
-  const validStartUrl = startUrl.startsWith("http") ? startUrl : `https://${startUrl}`;
-  const allowedDomains = raw.workflow?.allowedDomains || raw.allowedDomains || raw.allowed_domains || input.allowedDomains;
+  const rawFields = raw.workflow?.extractionSchema?.fields || raw.extractionSchema?.fields || raw.extractionSchema || [];
+  let fields: any[] = [];
 
-  const validActionTypes = ["NAVIGATE", "CLICK", "TYPE", "SELECT", "CHECK", "UNCHECK", "SCROLL", "WAIT_FOR", "EXTRACT", "DOWNLOAD", "UPLOAD", "ASSERT", "SCREENSHOT", "DONE"];
-
-  const rawSteps = raw.workflow?.steps || raw.steps || raw.plan || raw.workflow?.plan || [];
-  const steps = rawSteps.map((s: any, idx: number) => {
-    let actionType = "NAVIGATE";
-    const rawAction = String(s.type || s.action || "").toUpperCase();
-    if (validActionTypes.includes(rawAction)) {
-      actionType = rawAction;
-    } else if (rawAction.includes("NAVIGATE")) {
-      actionType = "NAVIGATE";
-    } else if (rawAction.includes("CLICK")) {
-      actionType = "CLICK";
-    } else if (rawAction.includes("WAIT")) {
-      actionType = "WAIT_FOR";
-    } else if (rawAction.includes("EXTRACT")) {
-      actionType = "EXTRACT";
-    }
-
-    return {
-      id: String(s.id || s.step_id || s.step || `step_${idx + 1}`),
-      type: actionType,
-      description: s.description || s.summary || `Execute step ${idx + 1}`,
-      url: s.url || s.target || validStartUrl,
-      risk: ["LOW", "MEDIUM", "HIGH"].includes(s.risk) ? s.risk : "LOW",
-    };
-  });
-
-  let rawFields: any[] = [];
-  const extSchema = raw.workflow?.extractionSchema || raw.extractionSchema || raw.workflow?.extraction_schema || raw.extraction_schema;
-  if (Array.isArray(extSchema)) {
-    rawFields = extSchema;
-  } else if (Array.isArray(extSchema?.fields)) {
-    rawFields = extSchema.fields;
-  } else if (extSchema?.properties || extSchema?.items?.properties) {
-    const props = extSchema.properties || extSchema.items?.properties;
-    const arrayPropKey = Object.keys(props).find(k => props[k].type === "array");
-    if (arrayPropKey && props[arrayPropKey].items?.properties) {
-      const itemProps = props[arrayPropKey].items.properties;
-      rawFields = Object.keys(itemProps).map(k => ({
-        name: k,
-        type: itemProps[k].type || "string",
-        description: itemProps[k].description || ""
-      }));
-    } else {
-      rawFields = Object.keys(props).map(k => ({
-        name: k,
-        type: props[k].type || "string",
-        description: props[k].description || ""
-      }));
-    }
+  if (Array.isArray(rawFields) && rawFields.length > 0) {
+    fields = rawFields.map((f: any) => {
+      if (typeof f === "string") return { name: f, type: "string", required: false };
+      return {
+        name: String(f.name || f.fieldName || "field"),
+        type: ["string", "number", "boolean", "date", "url", "array"].includes(f.type) ? f.type : "string",
+        required: Boolean(f.required),
+      };
+    });
+  } else {
+    fields = [
+      { name: "title", type: "string", required: true },
+      { name: "url", type: "string", required: false },
+      { name: "snippet", type: "string", required: false },
+    ];
   }
-
-  const fields = rawFields.length > 0 ? rawFields : [
-    { name: "id", type: "string", required: true },
-    { name: "title", type: "string", required: true },
-    { name: "price", type: "string", required: false },
-  ];
 
   return {
-    summary: raw.summary || raw.workflow_name || `Automated Plan: ${input.goal}`,
-    requiresApproval: true,
+    summary,
+    requiresApproval: Boolean(raw.requiresApproval ?? true),
     workflow: {
       version: 1,
       goal: input.goal,
-      startUrl: validStartUrl,
-      allowedDomains: Array.isArray(allowedDomains) ? allowedDomains : [allowedDomains],
-      extractionSchema: {
-        fields: fields.map((f: any) => ({
-          name: String(f.name || f.fieldName || "field"),
-          type: ["string", "number", "boolean", "date", "url", "array"].includes(f.type) ? f.type : "string",
-          required: Boolean(f.required),
-        })),
-      },
-      steps: steps.length > 0 ? steps : [
-        {
-          id: "step_1",
-          type: "NAVIGATE",
-          description: `Navigate to ${validStartUrl}`,
-          url: validStartUrl,
-          risk: "LOW",
-        },
-        {
-          id: "step_2",
-          type: "EXTRACT",
-          description: "Extract target web data",
-          risk: "LOW",
-        },
-      ],
+      startUrl: startUrl.startsWith("http") ? startUrl : `https://${startUrl}`,
+      allowedDomains: input.allowedDomains,
+      extractionSchema: { fields },
+      steps,
     },
   };
 }
 
-async function callDirectGenAi(instruction: string, parts: any[]): Promise<string> {
+async function callDirectGenAi(instruction: string, parts: any[], schema?: any): Promise<string> {
   const useVertex = process.env.GOOGLE_GENAI_USE_VERTEXAI === "true";
   const project = process.env.GOOGLE_CLOUD_PROJECT || "webpilot-ai-hackathon";
-  const location = process.env.GOOGLE_CLOUD_LOCATION || "us-central1";
+  const location = process.env.GOOGLE_CLOUD_LOCATION || "global";
 
-  console.log(`📡 [DIRECT GENAI FALLBACK]: Invoking @google/genai (VertexAI: ${useVertex}, Project: ${project}, Location: ${location})...`);
+  console.log(`[DIRECT GENAI]: Invoking @google/genai (VertexAI: ${useVertex}, Model: ${model}, Project: ${project}, Location: ${location})`);
 
   const ai = new GoogleGenAI(
     useVertex
@@ -145,16 +127,55 @@ async function callDirectGenAi(instruction: string, parts: any[]): Promise<strin
     return JSON.stringify(p);
   });
 
-  const response = await ai.models.generateContent({
-    model,
-    contents,
-    config: {
-      systemInstruction: `${instruction}\n\nIMPORTANT: Respond ONLY with a valid JSON object matching the requested schema. Do not include markdown codeblocks or extra text.`,
-      responseMimeType: "application/json",
-    },
-  });
+  const MAX_RETRIES = 4;
+  const BASE_DELAY_MS = 1000;
 
-  return response.text || "";
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      const response = await ai.models.generateContent({
+        model,
+        contents,
+        config: {
+          systemInstruction: `${instruction}\n\nIMPORTANT: Respond ONLY with a valid JSON object matching the requested schema. Do not include markdown codeblocks or extra text.`,
+          responseMimeType: "application/json",
+          ...(schema ? { responseSchema: schema as Schema } : {}),
+        },
+      });
+
+      return response.text || "";
+    } catch (err: any) {
+      const status = err?.status || err?.code || 0;
+      const isRetryable = status === 429 || status === 503 || err?.message?.includes("RESOURCE_EXHAUSTED") || err?.message?.includes("overloaded");
+
+      if (!isRetryable || attempt === MAX_RETRIES) {
+        console.error(`[GENAI ERROR]: Non-retryable or max retries exhausted (attempt ${attempt + 1}/${MAX_RETRIES + 1}, status: ${status})`);
+        throw err;
+      }
+
+      const delay = BASE_DELAY_MS * Math.pow(2, attempt) + Math.random() * 500;
+      console.warn(`[RATE LIMITED]: 429/503 hit (attempt ${attempt + 1}/${MAX_RETRIES + 1}). Retrying in ${Math.round(delay)}ms...`);
+      await new Promise((resolve) => setTimeout(resolve, delay));
+    }
+  }
+
+  return "";
+}
+
+function toCleanJsonSchema(zodSchema: any): Schema {
+  try {
+    const rawSchema = zodToJsonSchema(zodSchema, {
+      target: "openApi3",
+      $refStrategy: "none",
+    }) as any;
+
+    delete rawSchema["$schema"];
+    delete rawSchema["definitions"];
+
+    return rawSchema as Schema;
+  } catch (e) {
+    console.warn("[SCHEMA CONVERSION ERROR]:", e);
+    return {} as Schema;
+  }
 }
 
 async function runJson<T extends z.ZodObject<any>>(
@@ -164,10 +185,22 @@ async function runJson<T extends z.ZodObject<any>>(
   parts: any[],
   inputContext?: any,
 ): Promise<z.infer<T>> {
-  console.log(`\n🤖 [AI AGENT REQUEST: ${name}]`);
-  console.log(`📌 Model: ${model} | Backend: ${process.env.GOOGLE_GENAI_USE_VERTEXAI === "true" ? "VERTEX_AI" : "GEMINI_API"}`);
-  console.log(`📝 Instruction:\n${instruction}`);
-  console.log(`📥 Input Parts:\n${JSON.stringify(parts, null, 2)}\n`);
+  console.log(`\n[AI AGENT REQUEST: ${name}]`);
+  console.log(`Model: ${model} | Backend: ${process.env.GOOGLE_GENAI_USE_VERTEXAI === "true" ? "VERTEX_AI" : "GEMINI_API"}`);
+  console.log(`Instruction:\n${instruction}`);
+  const logParts = parts.map((p) => {
+    if (p?.inlineData?.data) {
+      return {
+        ...p,
+        inlineData: {
+          ...p.inlineData,
+          data: `${p.inlineData.data.substring(0, 32)}... (base64 ${p.inlineData.data.length} chars)`,
+        },
+      };
+    }
+    return p;
+  });
+  console.log(`Input Parts:\n${JSON.stringify(logParts, null, 2)}\n`);
 
   let text = "";
 
@@ -208,28 +241,30 @@ async function runJson<T extends z.ZodObject<any>>(
       }
     }
   } catch (adkErr: any) {
-    console.warn(`⚠️ [ADK RUNNER NOTICE]: ${adkErr.message}`);
+    console.warn(`[ADK RUNNER NOTICE]: ${adkErr.message}`);
   }
 
   // Fallback to Direct Google GenAI SDK if ADK returned empty text
   if (!text.trim()) {
-    text = await callDirectGenAi(instruction, parts);
+    const jsonSchema = toCleanJsonSchema(schema);
+    console.log(`[SCHEMA ENFORCEMENT]: Passing responseSchema to GenAI: \n`, JSON.stringify(jsonSchema, null, 2));
+    text = await callDirectGenAi(instruction, parts, jsonSchema);
   }
 
-  console.log(`📤 [AI RAW RESPONSE: ${name}]:\n${text || "(EMPTY RESPONSE)"}\n`);
+  console.log(`[AI RAW RESPONSE: ${name}]:\n${text || "(EMPTY RESPONSE)"}\n`);
 
   if (!text.trim()) {
     throw new Error(`${name} produced no structured output from Vertex AI / Gemini API`);
   }
 
   const cleanedJson = extractCleanJson(text);
-  console.log(`✨ [CLEANED JSON: ${name}]:\n${cleanedJson}\n`);
+  console.log(`[CLEANED JSON: ${name}]:\n${cleanedJson}\n`);
 
   let rawObj: any;
   try {
     rawObj = JSON.parse(cleanedJson);
   } catch (e: any) {
-    console.warn(`⚠️ [JSON PARSE ERROR]: ${e.message}. Attempting auto-recovery...`);
+    console.warn(`[JSON PARSE ERROR]: ${e.message}. Attempting auto-recovery...`);
     try {
       rawObj = JSON.parse(cleanedJson + "}");
     } catch (e2) {
@@ -241,12 +276,69 @@ async function runJson<T extends z.ZodObject<any>>(
     }
   }
 
+function normalizeBrowserDecision(raw: any) {
+  if (!raw || typeof raw !== "object") {
+    return {
+      action: {
+        id: "step_1",
+        type: "DONE",
+        description: "Completed workflow action",
+        risk: "LOW",
+      },
+      done: true,
+      rationale: "Empty or invalid response from agent",
+    };
+  }
+
+  let rawAction = raw.action;
+  let actionType = "NAVIGATE";
+
+  if (typeof rawAction === "string") {
+    const str = rawAction.toUpperCase();
+    if (["NAVIGATE", "CLICK", "TYPE", "SELECT", "CHECK", "UNCHECK", "SCROLL", "WAIT_FOR", "EXTRACT", "DOWNLOAD", "UPLOAD", "ASSERT", "SCREENSHOT", "DONE"].includes(str)) {
+      actionType = str;
+    }
+  } else if (rawAction && typeof rawAction === "object") {
+    actionType = String(rawAction.type || rawAction.action || "NAVIGATE").toUpperCase();
+  } else if (raw.type) {
+    actionType = String(raw.type).toUpperCase();
+  }
+
+  if (!["NAVIGATE", "CLICK", "TYPE", "SELECT", "CHECK", "UNCHECK", "SCROLL", "WAIT_FOR", "EXTRACT", "DOWNLOAD", "UPLOAD", "ASSERT", "SCREENSHOT", "DONE"].includes(actionType)) {
+    actionType = "NAVIGATE";
+  }
+
+  const url = raw.url || (typeof rawAction === "object" ? rawAction.url : undefined) || raw.targetUrl;
+  const validUrl = url && url.startsWith("http") ? url : (url ? `https://${url}` : undefined);
+  const locator = (typeof rawAction === "object" ? rawAction.locator : undefined) || raw.locator;
+  const value = (typeof rawAction === "object" ? rawAction.value : undefined) || raw.value;
+  const description = (typeof rawAction === "object" ? rawAction.description : undefined) || raw.description || `Execute ${actionType} action`;
+
+  const isDone = Boolean(raw.done || actionType === "DONE" || (typeof rawAction === "object" && rawAction.done));
+
+  return {
+    action: {
+      id: "step_next",
+      type: actionType,
+      description: String(description),
+      url: validUrl,
+      locator: locator && typeof locator === "object" ? locator : undefined,
+      value: value ? String(value) : undefined,
+      risk: "LOW",
+    },
+    done: isDone,
+    rationale: String(raw.rationale || raw.reason || `Execute next browser action: ${actionType}`),
+  };
+}
+
   if (name === "planner_agent" && inputContext) {
     rawObj = normalizePlanJson(rawObj, inputContext);
+  } else if (name === "navigator_agent") {
+    rawObj = normalizeBrowserDecision(rawObj);
   }
 
   const parsed = schema.parse(rawObj);
-  console.log(`✅ [PARSED VALIDATED OUTPUT: ${name}]:\n${JSON.stringify(parsed, null, 2)}\n`);
+  console.log(`[PARSED VALIDATED OUTPUT: ${name}]:\n${JSON.stringify(parsed, null, 2)}\n`);
 
   return parsed;
 }
@@ -424,3 +516,5 @@ export async function verifyRecovery(input: unknown) {
     [{ text: JSON.stringify(input) }],
   );
 }
+
+export * from "./orchestrator.js";

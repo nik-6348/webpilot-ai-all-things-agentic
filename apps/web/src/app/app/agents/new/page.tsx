@@ -86,16 +86,16 @@ export default function NewAgent() {
           targetUrl: extractedUrl,
           workspaceId: w.id,
           allowedDomains: ["*"],
-          requirePlanApproval: false,
+          requirePlanApproval: true,
         }),
       });
 
       if (out?.run?.id) {
-        router.push(`/app/runs/${out.run.id}`);
+        window.location.href = `/app/runs/${out.run.id}`;
       } else if (out?.agent?.id) {
-        router.push(`/app/agents/${out.agent.id}`);
+        window.location.href = `/app/agents/${out.agent.id}`;
       } else {
-        router.push("/app/runs");
+        window.location.href = "/app/agents";
       }
     } catch (e: any) {
       setErr(e.message || "Failed to launch web scraper agent");

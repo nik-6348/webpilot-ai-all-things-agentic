@@ -11,4 +11,4 @@ coverage
 packages/database/generated
 .turbo
 *.tsbuildinfo
-
+.local

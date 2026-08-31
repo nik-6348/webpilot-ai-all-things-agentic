@@ -2,18 +2,24 @@
 
 import React, { useEffect, useState } from "react";
 import Link from "next/link";
-import { Bot, Sparkles, Play, ShieldCheck, Clock, ArrowRight, Layers } from "lucide-react";
+import { Bot, Sparkles, Clock } from "lucide-react";
 import { api, workspace } from "../../../lib/api";
+import { ScheduleModal, cleanAgentTitle } from "../../../components/ScheduleModal";
 
 export default function Agents() {
   const [agents, setAgents] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [wsId, setWsId] = useState("");
+
+  // Schedule Modal State
+  const [scheduleModalAgent, setScheduleModalAgent] = useState<any>(null);
 
   useEffect(() => {
     async function loadAgents() {
       try {
         const ws = await workspace();
         if (ws?.id) {
+          setWsId(ws.id);
           const res = await api(`/api/v1/agents?workspaceId=${ws.id}`);
           if (Array.isArray(res)) setAgents(res);
         }
@@ -66,47 +72,95 @@ export default function Agents() {
           </Link>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {agents.map((ag) => (
-            <div key={ag.id} className="glass-panel rounded-2xl p-6 flex flex-col justify-between space-y-6 hover:border-indigo-500/40 transition-all">
-              <div>
-                <div className="flex items-center justify-between mb-3">
-                  <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
-                    {ag.status || "ACTIVE"}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-2 gap-6">
+          {agents.map((ag) => {
+            const isProd = Boolean(ag.activeVersionId);
+            const cleanTitle = cleanAgentTitle(ag.name, ag.goal);
+            const targetUrlStr = ag.targetUrl || ag.versions?.[0]?.workflowSpec?.startUrl || "https://www.flipkart.com";
+            const promptStr = ag.goal || ag.description || ag.versions?.[0]?.workflowSpec?.goal || "Automated web scraping task";
+
+            return (
+              <div key={ag.id} className="glass-panel rounded-2xl p-6 flex flex-col justify-between space-y-4 border-slate-800 bg-slate-950/60 hover:border-sky-500/40 transition-all">
+                {/* 🏷️ TOP BADGE & VERSION LOGS COUNT */}
+                <div className="flex items-center justify-between">
+                  <span className={`px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider border ${
+                    isProd
+                      ? "bg-sky-500/10 text-sky-400 border-sky-500/40 shadow-sm shadow-sky-500/10"
+                      : "bg-amber-500/10 text-amber-400 border-amber-500/40"
+                  }`}>
+                    {isProd ? "ACTIVE: V1.0" : "DRAFT MODE"}
                   </span>
 
-                  <span className="text-[11px] font-mono text-indigo-400 font-bold bg-indigo-500/10 px-2 py-0.5 rounded-md border border-indigo-500/30">
-                    {ag.activeVersionId ? "PRODUCTION (v1.1)" : "LEARNING (v1.0)"}
+                  <span className="text-xs text-slate-500 font-mono">
+                    {ag.versions?.length || 1} Version Log(s)
                   </span>
                 </div>
 
-                <Link href={`/app/agents/${ag.id}`}>
-                  <h3 className="text-lg font-black text-white hover:text-sky-400 transition-colors">{ag.name}</h3>
-                </Link>
-                <p className="text-xs text-slate-400 mt-1.5 line-clamp-2 leading-relaxed">
-                  {ag.goal || ag.description || "Autonomous Web Extraction Agent"}
-                </p>
-              </div>
+                {/* 📌 CLEAN AGENT TITLE */}
+                <div>
+                  <Link href={`/app/agents/${ag.id}`}>
+                    <h3 className="text-lg font-extrabold text-white hover:text-sky-400 transition-colors line-clamp-1">
+                      {cleanTitle}
+                    </h3>
+                  </Link>
+                </div>
 
-              <div className="pt-4 border-t border-slate-800/80 flex items-center justify-between">
-                <Link
-                  href={`/app/agents/${ag.id}`}
-                  className="text-xs font-bold text-sky-400 hover:underline flex items-center gap-1"
-                >
-                  Configure Agent <ArrowRight className="w-3.5 h-3.5" />
-                </Link>
+                {/* 📦 NESTED DARK INSET CONFIG BOX */}
+                <div className="bg-slate-900/80 border border-slate-800/80 rounded-xl p-4 space-y-3">
+                  <div>
+                    <span className="text-[10px] font-black uppercase tracking-wider text-slate-500 block mb-0.5">
+                      TARGET URL
+                    </span>
+                    <a
+                      href={targetUrlStr}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-xs font-mono font-bold text-sky-400 hover:underline block truncate"
+                    >
+                      {targetUrlStr}
+                    </a>
+                  </div>
 
-                <Link
-                  href={`/app/runs?agentId=${ag.id}`}
-                  className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-white font-bold text-[11px] transition-colors"
-                >
-                  View Runs
-                </Link>
+                  <div>
+                    <span className="text-[10px] font-black uppercase tracking-wider text-slate-500 block mb-0.5">
+                      SYSTEM PROMPT INSTRUCTION
+                    </span>
+                    <p className="text-xs text-slate-300 line-clamp-3 leading-relaxed font-sans">
+                      {promptStr}
+                    </p>
+                  </div>
+                </div>
+
+                {/* ⚙️ FOOTER BUTTON ACTIONS */}
+                <div className="pt-2 flex items-center justify-between gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setScheduleModalAgent(ag)}
+                    className="px-4 py-2.5 rounded-xl bg-slate-900 border border-slate-800 text-slate-300 text-xs font-bold hover:bg-slate-800 transition-colors flex items-center gap-2 cursor-pointer"
+                  >
+                    <Clock className="w-3.5 h-3.5 text-sky-400" /> Schedule
+                  </button>
+
+                  <Link
+                    href={`/app/agents/${ag.id}`}
+                    className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-sky-400 via-sky-500 to-cyan-400 hover:opacity-95 text-slate-950 font-black text-xs shadow-lg shadow-sky-500/20 transition-all flex items-center gap-1.5"
+                  >
+                    Inspect Details →
+                  </Link>
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
+
+      {/* 📅 ENTERPRISE SCHEDULE MODAL */}
+      <ScheduleModal
+        isOpen={Boolean(scheduleModalAgent)}
+        onClose={() => setScheduleModalAgent(null)}
+        wsId={wsId}
+        agent={scheduleModalAgent}
+      />
     </div>
   );
 }

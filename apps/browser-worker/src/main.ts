@@ -1,6 +1,6 @@
 import Fastify from "fastify";
 import { executeRun } from "./engine.js";
-const app = Fastify({ logger: true });
+const app = Fastify({ logger: true, connectionTimeout: 600000, requestTimeout: 600000 });
 app.get("/health/live", async () => ({ ok: true, service: "browser-worker" }));
 app.get("/health/ready", async () => ({ ok: true }));
 app.post<{ Params: { runId: string } }>(

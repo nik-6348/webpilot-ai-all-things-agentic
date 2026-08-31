@@ -9,7 +9,7 @@ import { AppModule } from "./app.module.js";
 async function bootstrap() {
   const app = await NestFactory.create<NestFastifyApplication>(
     AppModule,
-    new FastifyAdapter({ trustProxy: true }),
+    new FastifyAdapter({ trustProxy: true, connectionTimeout: 600000, requestTimeout: 600000 }),
   );
   app.setGlobalPrefix("api/v1");
   app.enableCors({

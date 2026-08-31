@@ -10,9 +10,13 @@ import { SchedulesController } from "./modules/schedules.controller.js";
 import { ConnectionsController } from "./modules/connections.controller.js";
 import { IntegrationsController } from "./modules/integrations.controller.js";
 import { AdminController } from "./modules/admin.controller.js";
+import { AuthController } from "./modules/auth.controller.js";
+import { EmailService } from "./modules/email.service.js";
+
 @Module({
   controllers: [
     HealthController,
+    AuthController,
     WorkspacesController,
     AgentsController,
     RunsController,
@@ -22,6 +26,6 @@ import { AdminController } from "./modules/admin.controller.js";
     IntegrationsController,
     AdminController,
   ],
-  providers: [Reflector, { provide: APP_GUARD, useClass: AuthGuard }],
+  providers: [Reflector, EmailService, { provide: APP_GUARD, useClass: AuthGuard }],
 })
 export class AppModule {}

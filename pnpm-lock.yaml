@@ -53,6 +53,9 @@ importers:
       '@webpilot/security':
         specifier: workspace:*
         version: link:../../packages/security
+      '@webpilot/workflow-engine':
+        specifier: workspace:*
+        version: link:../../packages/workflow-engine
       firebase-admin:
         specifier: 14.3.0
         version: 14.3.0(@firebase/app-compat@0.5.17)(@firebase/app@0.16.1)(encoding@0.1.13)
@@ -183,10 +186,10 @@ importers:
     dependencies:
       '@google/adk':
         specifier: 1.5.0
-        version: 1.5.0(@grpc/grpc-js@1.14.4)(@mikro-orm/mariadb@6.6.16(@mikro-orm/core@6.6.16)(pg@8.20.0))(@mikro-orm/mssql@6.6.16(@mikro-orm/core@6.6.16)(mariadb@3.4.5)(pg@8.20.0))(@mikro-orm/mysql@6.6.16(@mikro-orm/core@6.6.16)(@types/node@22.20.1)(mariadb@3.4.5)(pg@8.20.0))(@mikro-orm/postgresql@6.6.16(@mikro-orm/core@6.6.16)(mariadb@3.4.5))(@mikro-orm/sqlite@6.6.16(@mikro-orm/core@6.6.16)(mariadb@3.4.5)(pg@8.20.0))(@opentelemetry/core@2.10.0(@opentelemetry/api@1.9.0))(encoding@0.1.13)
+        version: 1.5.0(@grpc/grpc-js@1.14.4)(@mikro-orm/mariadb@6.6.16(@mikro-orm/core@6.6.16)(pg@8.20.0))(@mikro-orm/mssql@6.6.16(@mikro-orm/core@6.6.16)(mariadb@3.4.5)(pg@8.20.0))(@mikro-orm/mysql@6.6.16(@mikro-orm/core@6.6.16)(@types/node@24.3.0)(mariadb@3.4.5)(pg@8.20.0))(@mikro-orm/postgresql@6.6.16(@mikro-orm/core@6.6.16)(mariadb@3.4.5))(@mikro-orm/sqlite@6.6.16(@mikro-orm/core@6.6.16)(mariadb@3.4.5)(pg@8.20.0))(@opentelemetry/core@2.10.0(@opentelemetry/api@1.9.0))(encoding@0.1.13)
       '@google/genai':
         specifier: 2.9.0
-        version: 2.9.0(@modelcontextprotocol/sdk@1.30.0(zod@4.5.2))
+        version: 2.9.0(@modelcontextprotocol/sdk@1.30.0(zod@4.1.5))
       '@webpilot/contracts':
         specifier: workspace:*
         version: link:../contracts
@@ -196,6 +199,9 @@ importers:
       zod:
         specifier: 4.1.5
         version: 4.1.5
+      zod-to-json-schema:
+        specifier: ^3.25.2
+        version: 3.25.2(zod@4.1.5)
 
   packages/contracts:
     dependencies:
@@ -5308,9 +5314,9 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  '@google-cloud/vertexai@1.12.0(@modelcontextprotocol/sdk@1.30.0(zod@4.5.2))(encoding@0.1.13)':
+  '@google-cloud/vertexai@1.12.0(@modelcontextprotocol/sdk@1.30.0(zod@4.1.5))(encoding@0.1.13)':
     dependencies:
-      '@google/genai': 1.52.0(@modelcontextprotocol/sdk@1.30.0(zod@4.5.2))
+      '@google/genai': 1.52.0(@modelcontextprotocol/sdk@1.30.0(zod@4.1.5))
       google-auth-library: 9.15.1(encoding@0.1.13)
     transitivePeerDependencies:
       - '@modelcontextprotocol/sdk'
@@ -5319,18 +5325,18 @@ snapshots:
       - supports-color
       - utf-8-validate
 
-  '@google/adk@1.5.0(@grpc/grpc-js@1.14.4)(@mikro-orm/mariadb@6.6.16(@mikro-orm/core@6.6.16)(pg@8.20.0))(@mikro-orm/mssql@6.6.16(@mikro-orm/core@6.6.16)(mariadb@3.4.5)(pg@8.20.0))(@mikro-orm/mysql@6.6.16(@mikro-orm/core@6.6.16)(@types/node@22.20.1)(mariadb@3.4.5)(pg@8.20.0))(@mikro-orm/postgresql@6.6.16(@mikro-orm/core@6.6.16)(mariadb@3.4.5))(@mikro-orm/sqlite@6.6.16(@mikro-orm/core@6.6.16)(mariadb@3.4.5)(pg@8.20.0))(@opentelemetry/core@2.10.0(@opentelemetry/api@1.9.0))(encoding@0.1.13)':
+  '@google/adk@1.5.0(@grpc/grpc-js@1.14.4)(@mikro-orm/mariadb@6.6.16(@mikro-orm/core@6.6.16)(pg@8.20.0))(@mikro-orm/mssql@6.6.16(@mikro-orm/core@6.6.16)(mariadb@3.4.5)(pg@8.20.0))(@mikro-orm/mysql@6.6.16(@mikro-orm/core@6.6.16)(@types/node@24.3.0)(mariadb@3.4.5)(pg@8.20.0))(@mikro-orm/postgresql@6.6.16(@mikro-orm/core@6.6.16)(mariadb@3.4.5))(@mikro-orm/sqlite@6.6.16(@mikro-orm/core@6.6.16)(mariadb@3.4.5)(pg@8.20.0))(@opentelemetry/core@2.10.0(@opentelemetry/api@1.9.0))(encoding@0.1.13)':
     dependencies:
       '@a2a-js/sdk': 0.3.14(@grpc/grpc-js@1.14.4)(express@4.22.2)
       '@google-cloud/opentelemetry-cloud-monitoring-exporter': 0.21.0(@opentelemetry/api@1.9.0)(@opentelemetry/core@2.10.0(@opentelemetry/api@1.9.0))(@opentelemetry/resources@2.10.0(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-metrics@2.10.0(@opentelemetry/api@1.9.0))(encoding@0.1.13)
       '@google-cloud/opentelemetry-cloud-trace-exporter': 3.1.0(@opentelemetry/api@1.9.0)(@opentelemetry/core@2.10.0(@opentelemetry/api@1.9.0))(@opentelemetry/resources@2.10.0(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-trace-base@2.10.0(@opentelemetry/api@1.9.0))
       '@google-cloud/storage': 7.22.0(encoding@0.1.13)
-      '@google-cloud/vertexai': 1.12.0(@modelcontextprotocol/sdk@1.30.0(zod@4.5.2))(encoding@0.1.13)
-      '@google/genai': 2.9.0(@modelcontextprotocol/sdk@1.30.0(zod@4.5.2))
+      '@google-cloud/vertexai': 1.12.0(@modelcontextprotocol/sdk@1.30.0(zod@4.1.5))(encoding@0.1.13)
+      '@google/genai': 2.9.0(@modelcontextprotocol/sdk@1.30.0(zod@4.1.5))
       '@mikro-orm/core': 6.6.16
       '@mikro-orm/mariadb': 6.6.16(@mikro-orm/core@6.6.16)(pg@8.20.0)
       '@mikro-orm/mssql': 6.6.16(@mikro-orm/core@6.6.16)(mariadb@3.4.5)(pg@8.20.0)
-      '@mikro-orm/mysql': 6.6.16(@mikro-orm/core@6.6.16)(@types/node@22.20.1)(mariadb@3.4.5)(pg@8.20.0)
+      '@mikro-orm/mysql': 6.6.16(@mikro-orm/core@6.6.16)(@types/node@24.3.0)(mariadb@3.4.5)(pg@8.20.0)
       '@mikro-orm/postgresql': 6.6.16(@mikro-orm/core@6.6.16)(mariadb@3.4.5)
       '@mikro-orm/reflection': 6.6.16(@mikro-orm/core@6.6.16)
       '@mikro-orm/sqlite': 6.6.16(@mikro-orm/core@6.6.16)(mariadb@3.4.5)(pg@8.20.0)
@@ -5365,7 +5371,7 @@ snapshots:
       - supports-color
       - utf-8-validate
 
-  '@google/genai@1.52.0(@modelcontextprotocol/sdk@1.30.0(zod@4.5.2))':
+  '@google/genai@1.52.0(@modelcontextprotocol/sdk@1.30.0(zod@4.1.5))':
     dependencies:
       google-auth-library: 10.9.1
       p-retry: 4.6.2
@@ -5378,7 +5384,7 @@ snapshots:
       - supports-color
       - utf-8-validate
 
-  '@google/genai@2.9.0(@modelcontextprotocol/sdk@1.30.0(zod@4.5.2))':
+  '@google/genai@2.9.0(@modelcontextprotocol/sdk@1.30.0(zod@4.1.5))':
     dependencies:
       google-auth-library: 10.9.1
       p-retry: 4.6.2
@@ -5582,11 +5588,11 @@ snapshots:
       mikro-orm: 6.6.16
       reflect-metadata: 0.2.2
 
-  '@mikro-orm/knex@6.6.16(@mikro-orm/core@6.6.16)(mariadb@3.4.5)(mysql2@3.20.0(@types/node@22.20.1))(pg@8.20.0)':
+  '@mikro-orm/knex@6.6.16(@mikro-orm/core@6.6.16)(mariadb@3.4.5)(mysql2@3.20.0(@types/node@24.3.0))(pg@8.20.0)':
     dependencies:
       '@mikro-orm/core': 6.6.16
       fs-extra: 11.3.3
-      knex: 3.2.10(mysql2@3.20.0(@types/node@22.20.1))(pg@8.20.0)
+      knex: 3.2.10(mysql2@3.20.0(@types/node@24.3.0))(pg@8.20.0)
       sqlstring: 2.3.3
     optionalDependencies:
       mariadb: 3.4.5
@@ -5689,11 +5695,11 @@ snapshots:
       - sqlite3
       - supports-color
 
-  '@mikro-orm/mysql@6.6.16(@mikro-orm/core@6.6.16)(@types/node@22.20.1)(mariadb@3.4.5)(pg@8.20.0)':
+  '@mikro-orm/mysql@6.6.16(@mikro-orm/core@6.6.16)(@types/node@24.3.0)(mariadb@3.4.5)(pg@8.20.0)':
     dependencies:
       '@mikro-orm/core': 6.6.16
-      '@mikro-orm/knex': 6.6.16(@mikro-orm/core@6.6.16)(mariadb@3.4.5)(mysql2@3.20.0(@types/node@22.20.1))(pg@8.20.0)
-      mysql2: 3.20.0(@types/node@22.20.1)
+      '@mikro-orm/knex': 6.6.16(@mikro-orm/core@6.6.16)(mariadb@3.4.5)(mysql2@3.20.0(@types/node@24.3.0))(pg@8.20.0)
+      mysql2: 3.20.0(@types/node@24.3.0)
     transitivePeerDependencies:
       - '@types/node'
       - better-sqlite3
@@ -7977,7 +7983,7 @@ snapshots:
       jwa: 2.0.1
       safe-buffer: 5.2.1
 
-  knex@3.2.10(mysql2@3.20.0(@types/node@22.20.1))(pg@8.20.0):
+  knex@3.2.10(mysql2@3.20.0(@types/node@24.3.0))(pg@8.20.0):
     dependencies:
       colorette: 2.0.19
       commander: 10.0.1
@@ -7994,7 +8000,7 @@ snapshots:
       tarn: 3.1.2
       tildify: 2.0.0
     optionalDependencies:
-      mysql2: 3.20.0(@types/node@22.20.1)
+      mysql2: 3.20.0(@types/node@24.3.0)
       pg: 8.20.0
     transitivePeerDependencies:
       - supports-color
@@ -8333,9 +8339,9 @@ snapshots:
       seq-queue: 0.0.5
       sqlstring: 2.3.3
 
-  mysql2@3.20.0(@types/node@22.20.1):
+  mysql2@3.20.0(@types/node@24.3.0):
     dependencies:
-      '@types/node': 22.20.1
+      '@types/node': 24.3.0
       aws-ssl-profiles: 1.1.2
       denque: 2.1.0
       generate-function: 2.3.1
@@ -9490,6 +9496,10 @@ snapshots:
     dependencies:
       grammex: 3.1.13
       graphmatch: 1.1.1
+
+  zod-to-json-schema@3.25.2(zod@4.1.5):
+    dependencies:
+      zod: 4.1.5
 
   zod-to-json-schema@3.25.2(zod@4.5.2):
     dependencies:

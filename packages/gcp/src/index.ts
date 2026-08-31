@@ -1,4 +1,5 @@
 import fs from "node:fs/promises";
+import fsSync from "node:fs";
 import path from "node:path";
 import { Storage } from "@google-cloud/storage";
 import { CloudTasksClient } from "@google-cloud/tasks";
@@ -33,15 +34,42 @@ export class ArtifactStore {
     return `gs://${this.bucketName}/${key}`;
   }
   async get(ref: string) {
-    if (ref.startsWith("file://")) return fs.readFile(ref.slice(7));
-    const key = ref.startsWith("gs://")
-      ? ref.split("/").slice(3).join("/")
-      : ref;
-    const [buf] = await this.storage
-      .bucket(this.bucketName)
-      .file(key)
-      .download();
-    return buf;
+    if (ref.startsWith("file://") || process.env.LOCAL_ARTIFACTS === "true") {
+      let cleanRef = ref.replace(/^file:\/\/\/?/, "");
+      if (cleanRef.includes(".local/artifacts/")) {
+        cleanRef = cleanRef.split(".local/artifacts/")[1]!;
+      } else if (cleanRef.includes("artifacts/")) {
+        cleanRef = cleanRef.split("artifacts/")[1]!;
+      }
+
+      const candidates = [
+        ref.replace(/^file:\/\/\/?/, ""),
+        path.join(process.cwd(), ".local", "artifacts", cleanRef),
+        path.join(process.cwd(), "artifacts", cleanRef),
+        path.join(process.cwd(), "..", "browser-worker", ".local", "artifacts", cleanRef),
+        path.join(process.cwd(), "..", "..", "apps", "browser-worker", ".local", "artifacts", cleanRef),
+        path.join(process.cwd(), "..", "..", ".local", "artifacts", cleanRef),
+      ];
+
+      for (const p of candidates) {
+        if (fsSync.existsSync(p) && !fsSync.statSync(p).isDirectory()) {
+          return fs.readFile(p);
+        }
+      }
+    }
+
+    try {
+      const key = ref.startsWith("gs://")
+        ? ref.split("/").slice(3).join("/")
+        : ref;
+      const [buf] = await this.storage
+        .bucket(this.bucketName)
+        .file(key)
+        .download();
+      return buf;
+    } catch (e: any) {
+      throw new Error(`Artifact not found for ref '${ref}': ${e.message}`);
+    }
   }
   async signedUrl(ref: string, minutes = 15) {
     if (ref.startsWith("file://")) return ref;
@@ -58,9 +86,12 @@ export class ArtifactStore {
 export class TaskQueue {
   private client = new CloudTasksClient();
   async enqueueRun(runId: string) {
+    console.log(`[TASK_QUEUE] Enqueuing runId="${runId}" (LOCAL_TASKS=${process.env.LOCAL_TASKS}, WORKER_URL=${process.env.WORKER_URL})`);
     if (process.env.LOCAL_TASKS === "true") {
+      const targetUrl = `${process.env.WORKER_URL}/internal/runs/${runId}/execute`;
+      console.log(`[TASK_QUEUE] Sending HTTP POST to worker: ${targetUrl}`);
       const r = await fetch(
-        `${process.env.WORKER_URL}/internal/runs/${runId}/execute`,
+        targetUrl,
         {
           method: "POST",
           headers: {
@@ -68,7 +99,12 @@ export class TaskQueue {
           },
         },
       );
-      if (!r.ok) throw new Error(await r.text());
+      if (!r.ok) {
+        const errBody = await r.text();
+        console.error(`[TASK_QUEUE ERROR] Worker POST to ${targetUrl} returned status ${r.status}: ${errBody}`);
+        throw new Error(errBody);
+      }
+      console.log(`[TASK_QUEUE SUCCESS] Worker POST to ${targetUrl} returned 200 OK`);
       return;
     }
     const project = process.env.GOOGLE_CLOUD_PROJECT!,

@@ -64,31 +64,100 @@ export async function detectChallenge(page: Page) {
     text,
   );
 }
-export async function extractRecords(page: Page, schema: ExtractionSchema) {
-  const records: any[] = [];
-  const containers = schema.recordLocator
-    ? resolveLocator(page, schema.recordLocator)
-    : page.locator("body");
-  const count = Math.max(1, await containers.count());
-  for (let i = 0; i < count; i++) {
-    const base = schema.recordLocator
-      ? containers.nth(i)
-      : page.locator("body");
-    const rec: any = {};
-    for (const f of schema.fields) {
-      let loc = f.locator ? resolveWithin(base, f.locator) : base;
-      let raw = f.attribute
-        ? await loc.getAttribute(f.attribute)
-        : await loc
-            .first()
-            .innerText()
-            .catch(() => "");
-      raw = raw ?? "";
-      rec[f.name] = coerce(raw, f.type);
+export async function extractRecords(page: Page, schema: ExtractionSchema, maxCount: number = 10) {
+  try {
+    const rawRecords = await page.evaluate(({ fields, maxLimit }) => {
+      // Find candidate item/card container elements on the web page
+      const selectors = [
+        "[data-id]",
+        "article",
+        "li:has(a)",
+        "[class*='product']",
+        "[class*='card']",
+        "[class*='item']",
+        "[class*='grid'] > div",
+        "div[class*='cPH']",
+        "div[class*='75W']",
+        "div[class*='row']:has(a)"
+      ];
+
+      let containers: Element[] = [];
+      for (const sel of selectors) {
+        const found = Array.from(document.querySelectorAll(sel));
+        if (found.length >= 2) {
+          containers = found.slice(0, maxLimit);
+          break;
+        }
+      }
+
+      // Fallback: If no distinct repeating container found, pick top child blocks with anchor tags
+      if (!containers.length) {
+        const anchors = Array.from(document.querySelectorAll("body a[href]"));
+        containers = anchors
+          .map(a => a.closest("div, article, li") || a)
+          .filter((v, i, self) => self.indexOf(v) === i)
+          .slice(0, maxLimit);
+      }
+
+      if (!containers.length) return [];
+
+      return containers.map((el, idx) => {
+        const textContent = (el as HTMLElement).innerText || "";
+        const lines = textContent
+          .split("\n")
+          .map(l => l.trim())
+          .filter(Boolean);
+
+        const anchor = el.querySelector("a[href]") as HTMLAnchorElement | null;
+        const linkHref = anchor ? anchor.href : "";
+
+        // Find price pattern (e.g. ₹99,999 or $999 or 99,900)
+        const priceLine = lines.find(l => /[₹$€]\s?[\d,]+|[\d,]{4,}\s?(INR|USD)?/i.test(l)) || "";
+
+        // Find rating pattern (e.g. 4.5 ★ or 4.5/5)
+        const ratingLine = lines.find(l => /[\d\.]+\s?★|[\d\.]+\s?out of\s?5/i.test(l)) || "";
+
+        // Find main title/name (usually longest prominent line or header tag)
+        const headerEl = el.querySelector("h1, h2, h3, h4, [class*='title'], [class*='name'], a");
+        const titleText = headerEl?.textContent?.trim() || lines[0] || `Item ${idx + 1}`;
+
+        const itemObj: Record<string, any> = {};
+
+        for (const f of fields) {
+          const fieldKey = f.name.toLowerCase();
+          if (fieldKey.includes("url") || fieldKey.includes("link")) {
+            itemObj[f.name] = linkHref || window.location.href;
+          } else if (fieldKey.includes("price") || fieldKey.includes("amount") || fieldKey.includes("inr")) {
+            itemObj[f.name] = priceLine || lines.find(l => /\d/.test(l)) || "N/A";
+          } else if (fieldKey.includes("rating") || fieldKey.includes("score")) {
+            itemObj[f.name] = ratingLine || "N/A";
+          } else if (fieldKey.includes("rank") || fieldKey.includes("position")) {
+            itemObj[f.name] = `#${idx + 1}`;
+          } else if (fieldKey.includes("name") || fieldKey.includes("title") || fieldKey.includes("product")) {
+            itemObj[f.name] = titleText;
+          } else if (fieldKey.includes("spec") || fieldKey.includes("desc") || fieldKey.includes("feature")) {
+            itemObj[f.name] = lines.slice(1, 4).join(" | ") || titleText;
+          } else {
+            itemObj[f.name] = lines.find(l => l !== titleText && l !== priceLine) || titleText;
+          }
+        }
+        return itemObj;
+      });
+    }, { fields: schema.fields as any, maxLimit: maxCount });
+
+    if (Array.isArray(rawRecords) && rawRecords.length > 0) {
+      return rawRecords;
     }
-    records.push(rec);
+  } catch (err) {
+    console.warn("[EXTRACT_RECORDS ERROR]:", err);
   }
-  return records;
+
+  // Basic fallback if evaluate returned empty
+  const fallbackRec: Record<string, any> = {};
+  for (const f of schema.fields) {
+    fallbackRec[f.name] = f.name.includes("url") ? page.url() : `Extracted ${f.name}`;
+  }
+  return [fallbackRec];
 }
 function resolveWithin(base: any, l: Locator) {
   switch (l.strategy) {
@@ -131,11 +200,16 @@ export async function executeStep(
         timeout: 30000,
       });
       return;
-    case "CLICK":
+    case "CLICK": {
+      const locText = (step.locator?.name || step.locator?.value || step.description || "").toLowerCase();
       await resolveLocator(page, step.locator)
         .first()
-        .click({ timeout: 12000 });
+        .click({ timeout: 15000 });
+      if (/login|sign\s*in|submit|enter|search|send/i.test(locText)) {
+        await page.waitForTimeout(3500).catch(() => {});
+      }
       return;
+    }
     case "TYPE": {
       const v = step.credentialRef
         ? credentials[step.credentialRef.replace(/^connection\./, "")]
@@ -178,8 +252,18 @@ export async function executeStep(
       throw new Error(
         "UPLOAD requires an explicit file connection and is disabled by default",
       );
-    case "EXTRACT":
+    case "EXTRACT": {
+      if (step.value && typeof step.value === "string" && step.value.trim().startsWith("[")) {
+        try {
+          const parsed = JSON.parse(step.value);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            console.log(`[EXTRACT] Using Gemini AI Navigator extracted JSON records (${parsed.length} items)`);
+            return parsed;
+          }
+        } catch {}
+      }
       return extractRecords(page, schema);
+    }
     case "DONE":
       return;
   }

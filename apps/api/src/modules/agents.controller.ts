@@ -1,7 +1,9 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
+  NotFoundException,
   Param,
   Patch,
   Post,
@@ -69,6 +71,7 @@ export class AgentsController {
   }
   @Post() async create(@Req() req: any, @Body() body: unknown) {
     const x = Create.parse(body);
+    console.log(`[API CREATE AGENT] Received request: name="${x.name}", targetUrl="${x.targetUrl}", allowedDomains=`, JSON.stringify(x.allowedDomains), `connectionId="${x.connectionId}", requirePlanApproval=${x.requirePlanApproval}`);
     await requireWorkspace(req.user.id, x.workspaceId, [
       "OWNER",
       "ADMIN",
@@ -99,9 +102,33 @@ export class AgentsController {
       allowedDomains: x.allowedDomains,
       credentialFields: connection?.credentialFields as string[] | undefined,
     });
-    // Enforce user-approved URL/domain boundary over model output.
-    plan.workflow.startUrl = x.targetUrl;
+    // Preserve AI-inferred startUrl (e.g. flipkart.com) if targetUrl was generic (google.com)
+    if (plan.workflow.startUrl && plan.workflow.startUrl.startsWith("http") && !plan.workflow.startUrl.includes("google.com")) {
+      await prisma.agent.update({
+        where: { id: a.id },
+        data: { targetUrl: plan.workflow.startUrl },
+      });
+      a.targetUrl = plan.workflow.startUrl;
+    } else {
+      plan.workflow.startUrl = x.targetUrl;
+    }
     plan.workflow.allowedDomains = x.allowedDomains;
+
+    if (x.name.startsWith("Public Scraper") && plan.summary) {
+      const cleanName = plan.summary.replace(/^Automated Plan:\s*/i, "").trim();
+      if (cleanName) {
+        const formattedName = cleanName.charAt(0).toUpperCase() + cleanName.slice(1);
+        await prisma.agent.update({
+          where: { id: a.id },
+          data: {
+            name: formattedName,
+            description: `Automated web intelligence scraper for ${cleanName}`,
+          },
+        });
+        a.name = formattedName;
+        a.description = `Automated web intelligence scraper for ${cleanName}`;
+      }
+    }
     const version = await prisma.agentVersion.create({
       data: {
         agentId: a.id,
@@ -139,7 +166,8 @@ export class AgentsController {
       where: { id: run.id },
       data: { modelCallCount: { increment: 1 } },
     });
-    if (x.requirePlanApproval)
+    if (x.requirePlanApproval) {
+      console.log(`[API CREATE AGENT] requirePlanApproval is TRUE, creating approval for runId="${run.id}"`);
       await prisma.approval.create({
         data: {
           workspaceId: x.workspaceId,
@@ -150,7 +178,10 @@ export class AgentsController {
           riskLevel: "MEDIUM",
         },
       });
-    else await new TaskQueue().enqueueRun(run.id);
+    } else {
+      console.log(`[API CREATE AGENT] requirePlanApproval is FALSE, enqueuing runId="${run.id}" to TaskQueue`);
+      await new TaskQueue().enqueueRun(run.id);
+    }
     return { agent: a, plan, version, run };
   }
   @Patch(":id/versions/:versionId") async editVersion(
@@ -168,8 +199,8 @@ export class AgentsController {
     const v = await prisma.agentVersion.findUniqueOrThrow({
       where: { id: versionId },
     });
-    if (v.agentId !== id || v.status !== "DRAFT")
-      throw new Error("Only draft versions can be edited");
+    if (v.agentId !== id)
+      throw new Error("Version mismatch: Version does not belong to this agent");
     const spec = WorkflowSpecSchema.parse(body.workflowSpec);
     spec.allowedDomains = a.allowedDomains as string[];
     spec.startUrl = a.targetUrl;
@@ -196,7 +227,11 @@ export class AgentsController {
     @Param("versionId") versionId: string,
   ) {
     const a = await prisma.agent.findUniqueOrThrow({ where: { id } });
-    await requireWorkspace(req.user.id, a.workspaceId, ["OWNER", "ADMIN"]);
+    await requireWorkspace(req.user.id, a.workspaceId, [
+      "OWNER",
+      "ADMIN",
+      "OPERATOR",
+    ]);
     const v = await prisma.agentVersion.findUniqueOrThrow({
       where: { id: versionId },
     });
@@ -259,9 +294,15 @@ export class AgentsController {
     @Param("id") id: string,
     @Body() body: any,
   ) {
-    const a = await prisma.agent.findUniqueOrThrow({ where: { id } });
-    await requireWorkspace(req.user.id, a.workspaceId, ["OWNER", "ADMIN"]);
-    const targetUrl = body.targetUrl || a.targetUrl;
+    const a = await prisma.agent.findUnique({ where: { id } });
+    if (!a) throw new NotFoundException(`Agent with id '${id}' not found`);
+    await requireWorkspace(req.user.id, a.workspaceId, [
+      "OWNER",
+      "ADMIN",
+      "OPERATOR",
+    ]);
+    const rawUrl = body.targetUrl || a.targetUrl;
+    const targetUrl = rawUrl ? rawUrl.replace(/[),\.\;\:]+$/, "") : rawUrl;
     const domains = body.allowedDomains || (a.allowedDomains as string[]);
     await assertSafeUrl(targetUrl, domains);
     if (body.connectionId !== undefined)
@@ -273,16 +314,74 @@ export class AgentsController {
     const out = await prisma.agent.update({
       where: { id },
       data: {
-        name: body.name,
-        description: body.description,
-        status: body.status,
-        targetUrl: body.targetUrl,
-        allowedDomains: body.allowedDomains,
-        connectionId: body.connectionId,
+        ...(body.name !== undefined && { name: body.name }),
+        ...(body.description !== undefined && { description: body.description }),
+        ...(body.goal !== undefined && { goal: body.goal }),
+        ...(body.status !== undefined && { status: body.status }),
+        targetUrl,
+        ...(body.allowedDomains !== undefined && { allowedDomains: body.allowedDomains }),
+        ...(body.connectionId !== undefined && { connectionId: body.connectionId }),
         rowVersion: { increment: 1 },
       },
     });
+
+    if (body.goal && body.regenerateSchema !== false) {
+      try {
+        console.log(`[AGENT_UPDATE] Triggering Gemini AI planWorkflow for updated goal: "${body.goal}"`);
+        const plan = await planWorkflow({
+          goal: body.goal,
+          targetUrl,
+          allowedDomains: domains,
+        });
+
+        const draftVer = await prisma.agentVersion.findFirst({
+          where: { agentId: id },
+          orderBy: { createdAt: "desc" },
+        });
+
+        if (draftVer) {
+          const updatedSpec = {
+            ...(draftVer.workflowSpec as any),
+            goal: body.goal,
+            extractionSchema: plan.workflow.extractionSchema,
+            steps: plan.workflow.steps,
+          };
+
+          await prisma.agentVersion.update({
+            where: { id: draftVer.id },
+            data: { workflowSpec: updatedSpec },
+          });
+        }
+      } catch (e: any) {
+        console.warn(`[AGENT_UPDATE AI RE-PLAN ERROR]: ${e.message}`);
+      }
+    }
+
     await audit(a.workspaceId, req.user.id, "AGENT_UPDATED", "agent", id);
     return out;
+  }
+
+  @Delete(":id") async delete(@Req() req: any, @Param("id") id: string) {
+    const a = await prisma.agent.findUniqueOrThrow({ where: { id } });
+    await requireWorkspace(req.user.id, a.workspaceId, [
+      "OWNER",
+      "ADMIN",
+      "OPERATOR",
+      "VIEWER",
+    ]);
+
+    await prisma.$transaction([
+      prisma.runEvent.deleteMany({ where: { run: { agentId: id } } }),
+      prisma.runStep.deleteMany({ where: { run: { agentId: id } } }),
+      prisma.approval.deleteMany({ where: { run: { agentId: id } } }),
+      prisma.modelInvocation.deleteMany({ where: { run: { agentId: id } } }),
+      prisma.run.deleteMany({ where: { agentId: id } }),
+      prisma.schedule.deleteMany({ where: { agentId: id } }),
+      prisma.agentVersion.deleteMany({ where: { agentId: id } }),
+      prisma.agent.delete({ where: { id } }),
+    ]);
+
+    await audit(a.workspaceId, req.user.id, "AGENT_DELETED", "agent", id);
+    return { ok: true, id };
   }
 }
