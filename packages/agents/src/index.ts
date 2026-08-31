@@ -28,6 +28,16 @@ function normalizePlanJson(raw: any, input: { goal: string; targetUrl: string; a
   const validStartUrl = input.targetUrl.startsWith("http") ? input.targetUrl : `https://${input.targetUrl}`;
 
   const summary = String(raw.summary || raw.workflowName || raw.workflow?.goal || input.goal);
+  // A short, human-scannable label distinct from `summary` (which is
+  // often the full goal restated) -- fall back to truncating the goal at
+  // a word boundary if the model didn't return one, so agent lists never
+  // end up showing a full paragraph as a "name".
+  const rawName = String(raw.name || raw.title || "").trim();
+  const name =
+    rawName ||
+    (input.goal.length > 60
+      ? `${input.goal.slice(0, 60).replace(/\s+\S*$/, "")}…`
+      : input.goal);
   const startUrl = String(raw.workflow?.startUrl || raw.startUrl || validStartUrl);
   
   let rawSteps = raw.workflow?.steps || raw.steps || [];
@@ -91,6 +101,7 @@ function normalizePlanJson(raw: any, input: { goal: string; targetUrl: string; a
   }
 
   return {
+    name,
     summary,
     requiresApproval: Boolean(raw.requiresApproval ?? true),
     workflow: {
@@ -385,6 +396,7 @@ export async function planWorkflow(input: {
 }) {
   if (process.env.MOCK_AI === "true")
     return PlanSchema.parse({
+      name: "Supplier Order Exception Monitor",
       summary: "Monitor supplier purchase-order exceptions",
       requiresApproval: true,
       workflow: {
@@ -433,7 +445,7 @@ export async function planWorkflow(input: {
 
   return runJson(
     "planner_agent",
-    `You design safe reusable browser workflows. Produce a concrete plan and extraction schema. The "targetUrl" field is only a best-effort guess from whatever client created this request, not a confirmed fact -- if the goal text itself names a specific site or URL, always set workflow.startUrl to that site, even when it differs from targetUrl (a generic guess like "google.com" or "example.com" is a strong signal the guess was wrong and the goal's own URL should be trusted instead). The extraction schema's field names must be specific to what the goal actually asks for (e.g. "productName", "price", "ramGb", "displaySize" for a phone-shopping goal) -- never generic placeholders like "title"/"url"/"snippet" unless the goal is genuinely that generic (e.g. a plain search-result list). Precise field names are what a downstream extractor keys off of; vague ones produce vague, noisy data. Never widen allowed domains. Credentials are referenced only by provided field names; never ask for secret values. ${WEB_CONTENT_BOUNDARY}`,
+    `You design safe reusable browser workflows. Produce a concrete plan and extraction schema, plus a short "name" for this agent -- 3 to 6 words, title case, naming the site and task (e.g. "Automation Exercise Shirt Comparison", "Flipkart Phone Price Tracker"). Never restate the whole goal as the name; "summary" is where the fuller restatement belongs. The "targetUrl" field is only a best-effort guess from whatever client created this request, not a confirmed fact -- if the goal text itself names a specific site or URL, always set workflow.startUrl to that site, even when it differs from targetUrl (a generic guess like "google.com" or "example.com" is a strong signal the guess was wrong and the goal's own URL should be trusted instead). The extraction schema's field names must be specific to what the goal actually asks for (e.g. "productName", "price", "ramGb", "displaySize" for a phone-shopping goal) -- never generic placeholders like "title"/"url"/"snippet" unless the goal is genuinely that generic (e.g. a plain search-result list). Precise field names are what a downstream extractor keys off of; vague ones produce vague, noisy data. Never widen allowed domains. Credentials are referenced only by provided field names; never ask for secret values. ${WEB_CONTENT_BOUNDARY}`,
     PlanSchema,
     [{ text: JSON.stringify(input) }],
     input,

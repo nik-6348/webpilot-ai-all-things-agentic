@@ -60,6 +60,7 @@ export const WorkflowSpecSchema = z.object({
 export type WorkflowSpec = z.infer<typeof WorkflowSpecSchema>;
 
 export const PlanSchema = z.object({
+  name: z.string().optional(),
   summary: z.string(),
   requiresApproval: z.boolean().default(true),
   workflow: WorkflowSpecSchema,

@@ -123,18 +123,25 @@ export class AgentsController {
     plan.workflow.allowedDomains = x.allowedDomains;
 
     if (x.name.startsWith("Public Scraper") && plan.summary) {
-      const cleanName = plan.summary.replace(/^Automated Plan:\s*/i, "").trim();
+      const cleanSummary = plan.summary.replace(/^Automated Plan:\s*/i, "").trim();
+      // Prefer the Planner's own short "name" (a few words); it only
+      // falls back to the (often paragraph-length) summary if that's
+      // missing, in which case it's hard-capped here so an agent list
+      // never has to render a whole goal statement as its title.
+      const rawName = (plan.name || cleanSummary).trim();
+      const cleanName =
+        rawName.length > 70 ? `${rawName.slice(0, 70).replace(/\s+\S*$/, "")}…` : rawName;
       if (cleanName) {
         const formattedName = cleanName.charAt(0).toUpperCase() + cleanName.slice(1);
         await prisma.agent.update({
           where: { id: a.id },
           data: {
             name: formattedName,
-            description: `Automated web intelligence scraper for ${cleanName}`,
+            description: `Automated web intelligence scraper for ${cleanSummary}`,
           },
         });
         a.name = formattedName;
-        a.description = `Automated web intelligence scraper for ${cleanName}`;
+        a.description = `Automated web intelligence scraper for ${cleanSummary}`;
       }
     }
     const version = await prisma.agentVersion.create({

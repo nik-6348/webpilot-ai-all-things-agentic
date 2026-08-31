@@ -31,7 +31,7 @@ import {
   Loader2
 } from "lucide-react";
 import { api } from "../../../../lib/api";
-import { ScheduleModal } from "../../../../components/ScheduleModal";
+import { ScheduleModal, cleanAgentTitle } from "../../../../components/ScheduleModal";
 import { useToast } from "../../../../components/Toast";
 import { ConfirmDialog } from "../../../../components/ConfirmDialog";
 
@@ -351,8 +351,8 @@ export default function AgentDetail() {
               {agent.status === "ACTIVE" ? "AGENT ACTIVE" : "AGENT DISABLED"}
             </button>
           </div>
-          <h1 className="text-2xl md:text-3xl font-black text-white flex items-center gap-2">
-            <Bot className="w-7 h-7 text-sky-400 shrink-0" /> {agent.name}
+          <h1 className="text-2xl md:text-3xl font-black text-white flex items-center gap-2" title={agent.name}>
+            <Bot className="w-7 h-7 text-sky-400 shrink-0" /> {cleanAgentTitle(agent.name, agent.goal)}
           </h1>
           <p className="text-xs text-slate-400 max-w-2xl">{agent.description || agent.goal}</p>
         </div>

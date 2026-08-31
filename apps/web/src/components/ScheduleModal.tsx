@@ -15,6 +15,10 @@ interface ScheduleModalProps {
   onSuccess?: () => void;
 }
 
+function truncateTitle(s: string, max = 70) {
+  return s.length > max ? `${s.slice(0, max).replace(/\s+\S*$/, "")}…` : s;
+}
+
 export function cleanAgentTitle(name: string, goal?: string) {
   if (!name || name.startsWith("Agent Run") || name.startsWith("Public Scraper") || /\d{10,}/.test(name)) {
     if (goal) {
@@ -23,7 +27,11 @@ export function cleanAgentTitle(name: string, goal?: string) {
     }
     return "Autonomous Scraper Agent";
   }
-  return name;
+  // Defensive cap for any agent (including ones created before names were
+  // planner-generated) whose stored name is a full goal/summary
+  // restatement rather than a short title -- lists shouldn't have to
+  // render a paragraph as a name.
+  return truncateTitle(name);
 }
 
 export function ScheduleModal({
