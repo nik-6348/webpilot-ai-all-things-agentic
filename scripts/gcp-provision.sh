@@ -69,7 +69,9 @@ grant() { gcloud projects add-iam-policy-binding "$PROJECT_ID" --member="service
 grant "$API_SA" roles/cloudsql.client
 grant "$API_SA" roles/cloudtasks.enqueuer
 grant "$API_SA" roles/cloudscheduler.admin
-grant "$API_SA" roles/secretmanager.secretAccessor
+grant "$API_SA" roles/secretmanager.admin # not secretAccessor alone -- the API creates new
+# secrets per Connection/Slack-OAuth-token at request time (secretAccessor only permits
+# reading existing ones, not secretmanager.secrets.create)
 grant "$API_SA" roles/pubsub.publisher
 grant "$API_SA" roles/aiplatform.user
 # Firebase Admin's createCustomToken() (email/password login session bridge)

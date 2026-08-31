@@ -175,6 +175,24 @@ export class SecretVault {
     return v.payload?.data?.toString() || "";
   }
 }
+// Cloud Scheduler serializes mutate (create/update/delete) calls per job
+// resource and rejects a second one arriving before the first has
+// propagated with gRPC code 10 (ABORTED, "sync mutate calls cannot be
+// queued") -- a real, transient condition the client library's own retry
+// classifier does not treat as retryable. A short backoff-and-retry is the
+// documented workaround.
+async function retryAborted<T>(fn: () => Promise<T>, attempts = 4): Promise<T> {
+  for (let i = 0; i < attempts; i++) {
+    try {
+      return await fn();
+    } catch (e: any) {
+      if (e?.code !== 10 || i === attempts - 1) throw e;
+      await new Promise((r) => setTimeout(r, 500 * Math.pow(2, i)));
+    }
+  }
+  throw new Error("unreachable");
+}
+
 export class SchedulerService {
   private client = new CloudSchedulerClient();
   async upsert(id: string, cron: string, timezone: string, targetUrl: string) {
@@ -196,18 +214,21 @@ export class SchedulerService {
         },
       },
     };
+    let exists = true;
     try {
       await this.client.getJob({ name });
-      await this.client.updateJob({ job });
     } catch {
-      await this.client.createJob({ parent, job });
+      exists = false;
     }
+    await retryAborted(() =>
+      exists ? this.client.updateJob({ job }) : this.client.createJob({ parent, job }),
+    );
     return name;
   }
   async remove(name: string) {
     if (process.env.LOCAL_SCHEDULER === "true" || name.startsWith("local:"))
       return;
-    await this.client.deleteJob({ name }).catch((e: any) => {
+    await retryAborted(() => this.client.deleteJob({ name })).catch((e: any) => {
       if (e?.code !== 5) throw e;
     });
   }
