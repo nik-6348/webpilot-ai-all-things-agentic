@@ -13,5 +13,9 @@ ENV NEXT_PUBLIC_FIREBASE_PROJECT_ID=$NEXT_PUBLIC_FIREBASE_PROJECT_ID
 ENV NEXT_PUBLIC_LOCAL_AUTH_BYPASS=$NEXT_PUBLIC_LOCAL_AUTH_BYPASS
 RUN pnpm install --no-frozen-lockfile && pnpm turbo build --filter=@webpilot/web...
 ENV NODE_ENV=production
-EXPOSE 3000
+# Cloud Run injects PORT (8080) at runtime; `next start` (no -p flag, see
+# apps/web/package.json) reads it automatically. EXPOSE is documentation
+# only, not a runtime binding -- kept generic since the real port is
+# whatever Cloud Run sets.
+EXPOSE 8080
 CMD ["pnpm","--filter","@webpilot/web","start"]
