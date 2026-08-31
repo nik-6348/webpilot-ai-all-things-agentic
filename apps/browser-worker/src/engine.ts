@@ -383,6 +383,7 @@ async function discover(
           step,
           credentials,
           planned.extractionSchema,
+          { liveDecision: true },
         );
       } catch (stepErr: any) {
         console.warn(`[STEP EXECUTION FAILED] ${stepErr.message}. Attempting AI Self-Healing...`);
@@ -405,6 +406,7 @@ async function discover(
               step,
               credentials,
               planned.extractionSchema,
+              { liveDecision: true },
             );
             console.log(`[SELF-HEALING SUCCESS] Executed replacement step: ${step.description}`);
           }

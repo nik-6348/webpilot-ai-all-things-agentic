@@ -19,7 +19,31 @@ export function applyPatch(
   return WorkflowSpecSchema.parse({ ...spec, steps });
 }
 
+// Non-LLM safety floor: an action-committing step whose own description,
+// value, or locator text names a consequential real-world action gets
+// force-elevated to HIGH regardless of what the model self-assessed.
+// Risk classification previously trusted the same model whose output it
+// exists to check — a miscalibrated "LOW" on a real payment/delete click
+// would sail straight past the human-approval gate.
+const HIGH_RISK_SIGNAL =
+  /\b(delete|remove|purchase|buy\s*now|pay(ment)?|checkout|transfer|wire|place\s*order|confirm\s*order|submit\s*payment|deactivate|close\s*account|unsubscribe|cancel\s*subscription|withdraw|send\s*money)\b/i;
+
+function hasHighRiskSignal(step: WorkflowStep): boolean {
+  const text = [
+    step.description,
+    step.value,
+    step.locator?.name,
+    step.locator?.value,
+  ]
+    .filter(Boolean)
+    .join(" ");
+  return HIGH_RISK_SIGNAL.test(text);
+}
+
 export function classifyRisk(step: WorkflowStep): "LOW" | "MEDIUM" | "HIGH" {
+  const actionCommitting = ["CLICK", "TYPE", "SELECT", "CHECK", "UNCHECK", "UPLOAD"];
+  if (actionCommitting.includes(step.type) && hasHighRiskSignal(step)) return "HIGH";
+
   if (
     [
       "EXTRACT",

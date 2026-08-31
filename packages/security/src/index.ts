@@ -97,11 +97,17 @@ export async function assertSafeUrl(
     throw new Error(msg);
   }
 
+  // ALLOW_PRIVATE_DEMO only ever exempts the local demo-portal container by
+  // hostname — it must never become a blanket private-network bypass for
+  // arbitrary targets, which is what a bare env-flag check would allow.
+  const isDemoHost =
+    process.env.ALLOW_PRIVATE_DEMO === "true" &&
+    ["localhost", "127.0.0.1", "demo-portal"].includes(url.hostname);
+
   const answers = await dns.lookup(url.hostname, { all: true }).catch(() => []);
   if (
-    (!answers.length && !(process.env.ALLOW_PRIVATE_DEMO === "true" && url.hostname === "demo-portal")) ||
-    (answers.some((a) => privateIp(a.address)) &&
-      process.env.ALLOW_PRIVATE_DEMO !== "true")
+    (!answers.length && !isDemoHost) ||
+    (answers.some((a) => privateIp(a.address)) && !isDemoHost)
   )
     throw new Error("Private/internal network target blocked");
   return url;

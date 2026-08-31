@@ -12,3 +12,6 @@ packages/database/generated
 .turbo
 *.tsbuildinfo
 .local
+**/service-account*.json
+*.pem
+*.key

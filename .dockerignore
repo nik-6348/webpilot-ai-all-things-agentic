@@ -9,3 +9,7 @@ coverage
 .DS_Store
 packages/database/generated
 infra/terraform/.terraform
+**/service-account*.json
+*.pem
+*.key
+REPOSITORY_AUDIT

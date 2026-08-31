@@ -191,6 +191,14 @@ export async function executeStep(
   step: WorkflowStep,
   credentials: Record<string, string>,
   schema: ExtractionSchema,
+  // Only true for a decision the Navigator just returned this same run,
+  // never for a persisted/replayed WorkflowStep. EXTRACT/DONE steps must
+  // never trust a frozen literal value on replay — a persisted step's
+  // `value` is whatever the model happened to emit at discovery time, and
+  // trusting it forever would mean every future "zero-reasoning" fast-path
+  // run silently returns that one-time snapshot instead of re-scraping the
+  // live page.
+  opts: { liveDecision?: boolean } = {},
 ) {
   switch (step.type) {
     case "NAVIGATE":
@@ -253,7 +261,7 @@ export async function executeStep(
         "UPLOAD requires an explicit file connection and is disabled by default",
       );
     case "EXTRACT": {
-      if (step.value && typeof step.value === "string" && step.value.trim().startsWith("[")) {
+      if (opts.liveDecision && step.value && typeof step.value === "string" && step.value.trim().startsWith("[")) {
         try {
           const parsed = JSON.parse(step.value);
           if (Array.isArray(parsed) && parsed.length > 0) {
@@ -265,7 +273,7 @@ export async function executeStep(
       return extractRecords(page, schema);
     }
     case "DONE":
-      if (step.value && typeof step.value === "string" && step.value.trim().startsWith("[")) {
+      if (opts.liveDecision && step.value && typeof step.value === "string" && step.value.trim().startsWith("[")) {
         try {
           const parsed = JSON.parse(step.value);
           if (Array.isArray(parsed) && parsed.length > 0) {
