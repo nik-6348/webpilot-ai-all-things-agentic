@@ -39,6 +39,22 @@ Sign in with Google to try it. The worker and notifier are intentionally private
 
 ![Audit trail](demo/06-audit-trail.png)
 
+**7. Honest failure reporting** — when a run genuinely can't extract what was asked, the UI says exactly which fields are missing and why, instead of showing a fabricated result.
+
+![Failure explained](demo/07-failure-explained.png)
+
+**8. Step-by-step execution trace** — every action the agent takes is logged with its own screenshot, so a run's behavior is fully reconstructable after the fact.
+
+![Recovery steps](demo/08-recovery-steps.png)
+
+**9. Workspace settings & access control** — per-member roles, login-method toggles, and password management for the email/password path.
+
+![Settings](demo/09-settings.png)
+
+**10. Integrations hub** — Slack is a real OAuth connection (not a placeholder); Gmail/Chat/webhooks are marked accurately as in development rather than pretending to be ready.
+
+![Integrations](demo/10-integrations.png)
+
 ## Why this is different
 
 Most "AI browser agents" reason on every single run — slow, expensive, and one bad model response away from clicking the wrong thing. WebPilot only reasons **once**:
