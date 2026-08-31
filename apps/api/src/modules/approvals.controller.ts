@@ -1,8 +1,9 @@
-import { Controller, Get, Param, Post, Query, Req } from "@nestjs/common";
+import { Body, Controller, Get, Param, Post, Query, Req } from "@nestjs/common";
 import { prisma, type Prisma } from "@webpilot/database";
 import { TaskQueue } from "@webpilot/gcp";
 import { requireWorkspace, audit } from "../common/context.js";
 import { EmailService } from "./email.service.js";
+import { assertSafeUrl } from "@webpilot/security";
 
 @Controller("approvals")
 export class ApprovalsController {
@@ -20,10 +21,14 @@ export class ApprovalsController {
     });
   }
 
-  @Post(":id/approve") async approve(@Req() req: any, @Param("id") id: string) {
+  @Post(":id/approve") async approve(
+    @Req() req: any,
+    @Param("id") id: string,
+    @Body() body?: { correctedUrl?: string },
+  ) {
     const ap = await prisma.approval.findUniqueOrThrow({
       where: { id },
-      include: { run: true },
+      include: { run: { include: { agent: true } } },
     });
     await requireWorkspace(req.user.id, ap.workspaceId, [
       "OWNER",
@@ -31,6 +36,21 @@ export class ApprovalsController {
       "OPERATOR",
     ]);
     if (ap.status !== "PENDING") return ap;
+
+    // A HUMAN_VERIFICATION pause means the run got challenged at whatever
+    // URL it started from -- if that was a bad auto-guessed default (e.g.
+    // "google.com" itself triggers a bot-verification wall) rather than
+    // the real target, resuming with the same URL just repeats the same
+    // failure. Let the approver correct it here, applied before the run
+    // is re-dispatched.
+    if (ap.type === "HUMAN_VERIFICATION" && body?.correctedUrl && ap.run) {
+      const correctedUrl = body.correctedUrl.trim();
+      await assertSafeUrl(correctedUrl, ap.run.agent.allowedDomains as string[]);
+      await prisma.agent.update({
+        where: { id: ap.run.agentId },
+        data: { targetUrl: correctedUrl },
+      });
+    }
 
     if (ap.type === "ONBOARDING") {
       const payload: any = ap.payload || {};

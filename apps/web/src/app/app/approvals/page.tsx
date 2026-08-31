@@ -9,6 +9,7 @@ export default function Approvals() {
   const toast = useToast();
   const [approvals, setApprovals] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [urlOverrides, setUrlOverrides] = useState<Record<string, string>>({});
 
   async function loadApprovals() {
     try {
@@ -30,7 +31,11 @@ export default function Approvals() {
 
   async function handleAction(id: string, verb: "approve" | "reject") {
     try {
-      await api(`/api/v1/approvals/${id}/${verb}`, { method: "POST" });
+      const correctedUrl = urlOverrides[id]?.trim();
+      await api(`/api/v1/approvals/${id}/${verb}`, {
+        method: "POST",
+        body: correctedUrl ? JSON.stringify({ correctedUrl }) : undefined,
+      });
       await loadApprovals();
     } catch (e: any) {
       toast.error(e.message || `Failed to ${verb} approval`);
@@ -116,6 +121,22 @@ export default function Approvals() {
                       <p className="text-xs text-slate-400 mt-2 leading-relaxed">
                         {ap.reason || "Review proposed navigation steps and domain boundaries."}
                       </p>
+                      {ap.type === "HUMAN_VERIFICATION" && (
+                        <div className="mt-3 space-y-1">
+                          <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                            Target URL (edit if this got stuck on the wrong site)
+                          </label>
+                          <input
+                            type="text"
+                            defaultValue={ap.run?.agent?.targetUrl || ""}
+                            placeholder="https://example.com"
+                            onChange={(e) =>
+                              setUrlOverrides((prev) => ({ ...prev, [ap.id]: e.target.value }))
+                            }
+                            className="w-full text-xs font-mono bg-slate-950/60 border border-slate-800 rounded-lg px-2.5 py-1.5 text-slate-200 focus:outline-none focus:border-amber-500/50"
+                          />
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>

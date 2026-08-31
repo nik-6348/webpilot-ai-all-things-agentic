@@ -102,8 +102,16 @@ export class AgentsController {
       allowedDomains: x.allowedDomains,
       credentialFields: connection?.credentialFields as string[] | undefined,
     });
-    // Preserve AI-inferred startUrl (e.g. flipkart.com) if targetUrl was generic (google.com)
-    if (plan.workflow.startUrl && plan.workflow.startUrl.startsWith("http") && !plan.workflow.startUrl.includes("google.com")) {
+    // Preserve AI-inferred startUrl (e.g. flipkart.com) if targetUrl was generic
+    // (google.com/example.com) -- both are placeholder defaults the "quick
+    // create" form falls back to when it can't confidently parse a URL out
+    // of the free-text goal, not a real confirmed target.
+    if (
+      plan.workflow.startUrl &&
+      plan.workflow.startUrl.startsWith("http") &&
+      !plan.workflow.startUrl.includes("google.com") &&
+      !plan.workflow.startUrl.includes("example.com")
+    ) {
       await prisma.agent.update({
         where: { id: a.id },
         data: { targetUrl: plan.workflow.startUrl },

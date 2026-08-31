@@ -172,7 +172,7 @@ async function requiresApproval(runId: string, step: WorkflowStep) {
   );
   return true;
 }
-async function challengePause(runId: string, page: Page) {
+async function challengePause(runId: string, page: Page): Promise<boolean> {
   const shot = await page.screenshot({ type: "jpeg", quality: 70 });
   const ref = await artifacts.put(
     `runs/${runId}/challenge.jpg`,
@@ -180,6 +180,41 @@ async function challengePause(runId: string, page: Page) {
     "image/jpeg",
   );
   const run = await prisma.run.findUniqueOrThrow({ where: { id: runId } });
+
+  // "Approve & Resume" doesn't hand a human a live view of THIS paused
+  // browser -- it re-dispatches the run, which starts over from step 1 in
+  // a brand-new, cookie-less browser context (see executeRun/discover/
+  // fast, none of which resume from a checkpoint). Against a site that
+  // reliably challenges automated traffic (Cloudflare Turnstile, etc.)
+  // every retry hits the identical wall again, so without a cap this
+  // creates a fresh HUMAN_VERIFICATION approval forever and the queue
+  // never actually clears. Fail the run outright once that's evident
+  // instead of looping.
+  const priorPauses = await prisma.approval.count({
+    where: { runId, type: "HUMAN_VERIFICATION" },
+  });
+  const RETRY_BUDGET = 2;
+  if (priorPauses >= RETRY_BUDGET) {
+    await prisma.run.update({
+      where: { id: runId },
+      data: {
+        status: "FAILED",
+        errorCode: "HUMAN_VERIFICATION_UNRESOLVABLE",
+        errorMessage: `This site required human verification ${priorPauses + 1} times in a row, including after approval -- resuming restarts the run in a fresh browser session, so an automated retry cannot pass a bot challenge like this. This target likely needs to be run manually outside WebPilot, or from a residential/non-datacenter network.`,
+        completedAt: new Date(),
+        leaseOwner: null,
+        leaseExpiresAt: null,
+      },
+    });
+    await event(
+      runId,
+      "RUN_FAILED",
+      "Human verification could not be resolved after repeated retries",
+      { url: page.url(), screenshot: ref },
+    );
+    return false;
+  }
+
   await prisma.approval.create({
     data: {
       workspaceId: run.workspaceId,
@@ -204,6 +239,7 @@ async function challengePause(runId: string, page: Page) {
     "CAPTCHA/bot verification detected",
     { url: page.url(), screenshot: ref },
   );
+  return true;
 }
 
 export async function executeRun(runId: string) {
@@ -374,8 +410,8 @@ async function discover(
     for (let i = 0; i < 25; i++) {
       const stepStart = Date.now();
       if (await detectChallenge(page)) {
-        await challengePause(runId, page);
-        return { paused: true };
+        const paused = await challengePause(runId, page);
+        return { paused };
       }
       const dom = await compactDom(page);
       const rawShot = await page.screenshot({ type: "jpeg", quality: 40 });
@@ -623,8 +659,8 @@ async function fast(
       const step = spec.steps[i]!;
       try {
         if (await detectChallenge(page)) {
-          await challengePause(runId, page);
-          return { paused: true };
+          const paused = await challengePause(runId, page);
+          return { paused };
         }
         if (await requiresApproval(runId, step)) return { paused: true };
         if (step.type === "NAVIGATE" && step.url)

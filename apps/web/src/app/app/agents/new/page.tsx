@@ -26,6 +26,8 @@ export default function NewAgent() {
 
   // Single Prompt Launcher State
   const [singlePrompt, setSinglePrompt] = useState("");
+  const [manualUrl, setManualUrl] = useState("");
+  const [needsManualUrl, setNeedsManualUrl] = useState(false);
 
   // Advanced Agent Config Form State
   const [form, setForm] = useState({
@@ -64,12 +66,19 @@ export default function NewAgent() {
       if (!w?.id) throw new Error("Workspace context missing");
 
       // Smart Auto-extract URL / Domain Parser
-      let extractedUrl = "https://www.google.com";
+      let extractedUrl = "";
       const urlMatch = singlePrompt.match(/https?:\/\/[^\s]+/i);
       if (urlMatch) {
-        extractedUrl = urlMatch[0];
+        // Strip trailing sentence punctuation caught by the greedy match
+        // (e.g. "...checkout. https://example.com." would otherwise send
+        // a literal trailing "." as part of the URL).
+        extractedUrl = urlMatch[0].replace(/[.,;:!?)]+$/, "");
       } else {
-        const domainMatch = singlePrompt.match(/([a-zA-Z0-9-]+\.[a-zA-Z]{2,})/i);
+        // Match the FULL multi-label domain (e.g. "demo.nopcommerce.com"),
+        // not just its last two labels -- the previous pattern only
+        // captured "demo.nopcommerce" off of "demo.nopcommerce.com" since
+        // it had no way to repeat over more than one "label." segment.
+        const domainMatch = singlePrompt.match(/((?:[a-zA-Z0-9-]+\.)+[a-zA-Z]{2,})/i);
         if (domainMatch) {
           extractedUrl = `https://${domainMatch[0]}`;
         } else if (singlePrompt.toLowerCase().includes("flipkart")) {
@@ -77,6 +86,22 @@ export default function NewAgent() {
         } else if (singlePrompt.toLowerCase().includes("amazon")) {
           extractedUrl = "https://www.amazon.in";
         }
+      }
+
+      // No confident guess -- "google.com" used to be the silent fallback
+      // here, but starting a run there is close to guaranteed to hit a bot-
+      // verification wall immediately (Google itself challenges automated
+      // traffic), which just wastes the run. Ask instead of guessing.
+      if (!extractedUrl) {
+        if (!manualUrl.trim()) {
+          setNeedsManualUrl(true);
+          toast.error("Couldn't detect a target website in your prompt — enter the site URL below.");
+          setLoading(false);
+          return;
+        }
+        extractedUrl = manualUrl.trim().startsWith("http")
+          ? manualUrl.trim()
+          : `https://${manualUrl.trim()}`;
       }
 
       const out = await api<any>("/api/v1/agents", {
@@ -240,6 +265,24 @@ export default function NewAgent() {
               <CheckCircle2 className="w-4 h-4 text-emerald-400" /> Public Web Automation Mode: No target site login credentials required.
             </span>
           </div>
+
+          {needsManualUrl && (
+            <div className="space-y-2 p-4 rounded-xl bg-amber-500/10 border border-amber-500/30">
+              <label className="block text-xs font-bold text-amber-300 uppercase tracking-wider flex items-center gap-1.5">
+                <Globe className="w-4 h-4" /> Target Site URL
+              </label>
+              <input
+                type="text"
+                value={manualUrl}
+                onChange={(e) => setManualUrl(e.target.value)}
+                placeholder="https://example.com"
+                className="w-full px-4 py-2.5 rounded-xl bg-slate-950/90 border border-slate-800 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-amber-500 font-mono"
+              />
+              <p className="text-[11px] text-amber-400/80">
+                Your prompt didn't name a specific website, so this agent has nowhere confident to start. Add the URL here.
+              </p>
+            </div>
+          )}
 
           {err && (
             <div className="p-4 rounded-xl bg-rose-500/10 border border-rose-500/30 text-xs font-bold text-rose-400">
