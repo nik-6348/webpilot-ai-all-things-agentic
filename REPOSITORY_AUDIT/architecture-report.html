@@ -1,0 +1,480 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8"/>
+<title>WebPilot AI — Product, Architecture &amp; Services</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mermaid/10.9.1/mermaid.min.js"></script>
+<style>
+  @page { size: A4; margin: 0; }
+  @page landscape { size: A4 landscape; margin: 0; }
+  @page cover { size: A4; margin: 0; }
+  section.landscape { page: landscape; }
+  section.cover { page: cover; }
+
+  :root{
+    --blue:#4285F4; --blue-dk:#1a56c4; --purple:#8E24AA; --ink:#0f172a;
+    --slate:#475569; --line:#e2e8f0; --paper:#ffffff; --wash:#f7f9fc;
+    --green:#16a34a; --amber:#d97706;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: "Inter", -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+    color: var(--ink);
+    font-size: 11.5px;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+  }
+  code, .mono { font-family: "JetBrains Mono", "SFMono-Regular", Menlo, monospace; }
+  code { background: #eef2ff; color: #3730a3; padding: 1px 5px; border-radius: 4px; font-size: 10px; }
+
+  /* ---------- shared page chrome ---------- */
+  .page { width: 210mm; min-height: 297mm; position: relative; padding: 20mm 16mm 16mm; page-break-after: always; }
+  .page.wide { width: 297mm; min-height: 210mm; padding: 14mm 16mm; }
+  .page:last-child { page-break-after: auto; }
+  .kicker {
+    display: inline-flex; align-items: center; gap: 6px;
+    color: var(--blue); font-weight: 700; letter-spacing: 0.09em; font-size: 10px; text-transform: uppercase;
+  }
+  .kicker::before { content: ""; width: 16px; height: 2px; background: var(--blue); border-radius: 2px; }
+  h2.head {
+    font-size: 21px; font-weight: 800; margin: 6px 0 2px; color: var(--ink); letter-spacing: -0.3px;
+  }
+  .lede { color: var(--slate); font-size: 11.5px; margin: 6px 0 16px; max-width: 165mm; }
+  .pageno { position: absolute; bottom: 8mm; right: 16mm; font-size: 9px; color: #94a3b8; }
+  .pageno .brand { color: var(--blue); font-weight: 700; }
+
+  /* ---------- cover ---------- */
+  .cover-page {
+    width: 210mm; height: 297mm; position: relative; overflow: hidden;
+    background: linear-gradient(155deg, #0b1224 0%, #0f1c3d 42%, #142a5c 68%, #1a3a7a 100%);
+    color: #fff; page-break-after: always;
+  }
+  .cover-page .glow1 { position:absolute; top:-60mm; right:-50mm; width:180mm; height:180mm; border-radius:50%;
+    background: radial-gradient(circle, rgba(66,133,244,0.55) 0%, rgba(66,133,244,0) 70%); }
+  .cover-page .glow2 { position:absolute; bottom:-70mm; left:-40mm; width:160mm; height:160mm; border-radius:50%;
+    background: radial-gradient(circle, rgba(142,36,170,0.45) 0%, rgba(142,36,170,0) 70%); }
+  .cover-inner { position: relative; z-index: 2; height: 100%; padding: 26mm 20mm; display: flex; flex-direction: column; }
+  .cover-eyebrow {
+    display: inline-flex; align-self: flex-start; align-items: center; gap: 8px;
+    background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.18);
+    padding: 7px 14px; border-radius: 999px; font-size: 10.5px; font-weight: 600; letter-spacing: 0.04em;
+    color: #cfe0ff;
+  }
+  .cover-eyebrow .dot { width: 7px; height: 7px; border-radius: 50%; background: #34d399; box-shadow: 0 0 0 4px rgba(52,211,153,0.25); }
+  .cover-title { font-size: 54px; font-weight: 800; margin: 22mm 0 4mm; letter-spacing: -1.5px; line-height: 1.02; }
+  .cover-title span { background: linear-gradient(90deg, #8ab4ff, #d6b3ff); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .cover-sub { font-size: 15px; color: #b9c6e8; max-width: 130mm; font-weight: 400; margin-bottom: 14mm; }
+  .cover-badges { display: flex; flex-wrap: wrap; gap: 7px; margin-bottom: auto; }
+  .cover-badge {
+    background: rgba(255,255,255,0.07); border: 1px solid rgba(255,255,255,0.16); color: #dbe6ff;
+    padding: 5px 11px; border-radius: 6px; font-size: 10px; font-weight: 600;
+  }
+  .cover-icon { position: absolute; top: 24mm; right: 20mm; width: 30mm; height: 30mm; opacity: 0.9; }
+  .cover-meta {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 10px 24px;
+    border-top: 1px solid rgba(255,255,255,0.18); padding-top: 10mm; margin-top: 10mm;
+  }
+  .cover-meta .k { font-size: 9px; text-transform: uppercase; letter-spacing: 0.08em; color: #8ba3d6; margin-bottom: 2px; }
+  .cover-meta .v { font-size: 11px; color: #eef3ff; font-weight: 500; word-break: break-all; }
+
+  /* ---------- toc ---------- */
+  .toc-list { margin-top: 8mm; }
+  .toc-row { display: flex; align-items: baseline; gap: 10px; padding: 9px 0; border-bottom: 1px dashed var(--line); }
+  .toc-row .n { font-weight: 800; color: var(--blue); font-size: 13px; width: 20px; flex: none; }
+  .toc-row .t { font-weight: 600; font-size: 13px; color: var(--ink); }
+  .toc-row .d { color: var(--slate); font-size: 10.5px; margin-top: 1px; }
+  .toc-row .p { margin-left: auto; color: #94a3b8; font-size: 10.5px; font-weight: 600; }
+
+  /* ---------- cards / grid ---------- */
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .grid3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
+  .card {
+    border: 1px solid var(--line); border-radius: 10px; padding: 12px 13px; background: var(--paper);
+    box-shadow: 0 1px 0 rgba(15,23,42,0.02);
+  }
+  .card.accent { border-top: 3px solid var(--blue); }
+  .card h3 { margin: 0 0 5px; font-size: 12px; color: var(--ink); font-weight: 700; display:flex; align-items:center; gap:6px; }
+  .card h3 .chip { width: 7px; height: 7px; border-radius: 2px; background: var(--blue); display:inline-block; }
+  .card p { margin: 0; color: var(--slate); font-size: 10.8px; }
+
+  .stat-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin: 14px 0 4px; }
+  .stat { background: var(--wash); border: 1px solid var(--line); border-radius: 10px; padding: 12px 10px; text-align: center; }
+  .stat .num { font-size: 21px; font-weight: 800; color: var(--blue-dk); letter-spacing: -0.5px; }
+  .stat .lbl { font-size: 9.5px; color: var(--slate); margin-top: 2px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; }
+
+  .pill-row { display:flex; flex-wrap:wrap; gap:6px; margin: 8px 0 4px; }
+  .pill { background:#eef2ff; color:#3730a3; border-radius:999px; padding:4px 10px; font-size:9.5px; font-weight:700; }
+
+  /* ---------- diagrams ---------- */
+  .diagram-frame {
+    border: 1px solid var(--line); border-radius: 12px; padding: 10px; background: var(--wash);
+    display: flex; justify-content: center; align-items: center;
+  }
+  .diagram-frame.fill { min-height: 150mm; }
+
+  /* ---------- tables ---------- */
+  table { width: 100%; border-collapse: collapse; margin: 8px 0 14px; font-size: 10.3px; }
+  th, td { border-bottom: 1px solid var(--line); padding: 7px 9px; text-align: left; vertical-align: top; }
+  th { background: var(--ink); color: #fff; font-weight: 700; font-size: 9.5px; text-transform: uppercase; letter-spacing: 0.03em; }
+  th:first-child { border-top-left-radius: 6px; } th:last-child { border-top-right-radius: 6px; }
+  tr:nth-child(even) td { background: var(--wash); }
+  td strong { color: var(--ink); }
+
+  .flow-steps { display: flex; flex-direction: column; gap: 6px; margin: 10px 0 4px; }
+  .flow-step { display:flex; gap:10px; align-items:flex-start; border:1px solid var(--line); border-radius:9px; padding:9px 11px; background:#fff; }
+  .flow-step .idx {
+    flex: none; width: 20px; height: 20px; border-radius: 50%; background: var(--blue); color:#fff;
+    font-size: 10px; font-weight: 800; display:flex; align-items:center; justify-content:center; margin-top:1px;
+  }
+  .flow-step.heal .idx { background: var(--amber); }
+  .flow-step b { font-size: 11px; color: var(--ink); }
+  .flow-step span { color: var(--slate); font-size: 10.3px; }
+
+  .footnote { color: #94a3b8; font-size: 9px; margin-top: 8px; }
+</style>
+</head>
+<body>
+
+<!-- ================= COVER ================= -->
+<section class="page cover-page">
+  <svg class="cover-icon" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <circle cx="32" cy="32" r="30" stroke="#8ab4ff" stroke-width="2" opacity="0.5"/>
+    <circle cx="32" cy="32" r="6" fill="#8ab4ff"/>
+    <circle cx="14" cy="20" r="3.4" fill="#d6b3ff"/>
+    <circle cx="50" cy="20" r="3.4" fill="#d6b3ff"/>
+    <circle cx="14" cy="46" r="3.4" fill="#34d399"/>
+    <circle cx="50" cy="46" r="3.4" fill="#34d399"/>
+    <path d="M32 32L14 20M32 32L50 20M32 32L14 46M32 32L50 46" stroke="#8ab4ff" stroke-width="1.6" opacity="0.7"/>
+  </svg>
+  <div class="glow1"></div>
+  <div class="glow2"></div>
+  <div class="cover-inner">
+    <span class="cover-eyebrow"><span class="dot"></span> All Things Agentic Hackathon — Technical Submission</span>
+    <div class="cover-title">WebPilot<span> AI</span></div>
+    <div class="cover-sub">Autonomous Web Operations Platform — understand once, run deterministically, heal when the web changes. Product overview, system design, architecture, and the Google Cloud services running it in production.</div>
+    <div class="cover-badges">
+      <span class="cover-badge">Google ADK</span>
+      <span class="cover-badge">Gemini 3.7 Flash</span>
+      <span class="cover-badge">Vertex AI</span>
+      <span class="cover-badge">Cloud Run</span>
+      <span class="cover-badge">Cloud SQL</span>
+      <span class="cover-badge">Cloud Tasks</span>
+      <span class="cover-badge">Pub/Sub</span>
+      <span class="cover-badge">Cloud Scheduler</span>
+      <span class="cover-badge">Next.js</span>
+      <span class="cover-badge">NestJS</span>
+      <span class="cover-badge">Playwright</span>
+    </div>
+    <div class="cover-meta">
+      <div><div class="k">Live App</div><div class="v">webpilot-web-536937000866.us-central1.run.app</div></div>
+      <div><div class="k">API + Swagger</div><div class="v">webpilot-api-536937000866.us-central1.run.app/docs</div></div>
+      <div><div class="k">Repository</div><div class="v">github.com/nik-6348/webpilot-ai-all-things-agentic</div></div>
+      <div><div class="k">Author</div><div class="v">Nikhil Rajput</div></div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= TOC ================= -->
+<section class="page">
+  <span class="kicker">Contents</span>
+  <h2 class="head">What's in this document</h2>
+  <p class="lede">A judge's-eye walk through what WebPilot AI is, how it's designed, how it's built, and exactly which Google Cloud services carry the live deployment.</p>
+  <div class="toc-list">
+    <div class="toc-row"><span class="n">01</span><div><div class="t">Product Overview</div><div class="d">The problem, the approach, and what makes a repeat run different from the first one</div></div><span class="p">P.03</span></div>
+    <div class="toc-row"><span class="n">02</span><div><div class="t">System Design</div><div class="d">WorkflowSpec, Fast Path vs. Discovery, the self-healing loop, and the security boundaries</div></div><span class="p">P.04</span></div>
+    <div class="toc-row"><span class="n">03</span><div><div class="t">System Architecture</div><div class="d">The five Cloud Run services and how data moves between them</div></div><span class="p">P.05</span></div>
+    <div class="toc-row"><span class="n">04</span><div><div class="t">End-to-End Run Flow</div><div class="d">Discovery, Fast Path, and self-heal as one sequence, actor by actor</div></div><span class="p">P.06</span></div>
+    <div class="toc-row"><span class="n">05</span><div><div class="t">AI Agents &amp; Async Dispatch</div><div class="d">What each of the four agents does, and how every run gets scheduled</div></div><span class="p">P.07</span></div>
+    <div class="toc-row"><span class="n">06</span><div><div class="t">Google Cloud Services</div><div class="d">Every managed service in the production deployment and its exact role</div></div><span class="p">P.08</span></div>
+    <div class="toc-row"><span class="n">07</span><div><div class="t">Implementation Status</div><div class="d">What is actually built and running today, grouped by capability</div></div><span class="p">P.09</span></div>
+  </div>
+  <div class="pageno">WebPilot AI &nbsp;·&nbsp; <span class="brand">Architecture Report</span></div>
+</section>
+
+<!-- ================= 01 PRODUCT OVERVIEW ================= -->
+<section class="page">
+  <span class="kicker">01 · Product Overview</span>
+  <h2 class="head">Understand the web once. Run it forever.</h2>
+  <p class="lede">Most browser-automation tools either replay a brittle fixed script, or call a language model on every single step — slow, expensive, and non-deterministic. WebPilot AI does neither by default: it <strong>learns</strong> a task once with a live agent, then <strong>runs</strong> it deterministically, and only calls the model again when the page actually changes.</p>
+
+  <div class="stat-row">
+    <div class="stat"><div class="num">4</div><div class="lbl">Purpose-built agents</div></div>
+    <div class="stat"><div class="num">0</div><div class="lbl">Model calls on a healthy repeat run</div></div>
+    <div class="stat"><div class="num">5</div><div class="lbl">Independently deployed services</div></div>
+    <div class="stat"><div class="num">100%</div><div class="lbl">Typed workflow, no generated code execution</div></div>
+  </div>
+
+  <div class="grid3" style="margin-top:14px">
+    <div class="card accent">
+      <h3><span class="chip"></span>The problem</h3>
+      <p>Web automation either breaks the moment a site's DOM changes, or re-runs an LLM on every click — burning tokens and latency on pages that haven't changed at all.</p>
+    </div>
+    <div class="card accent">
+      <h3><span class="chip"></span>The approach</h3>
+      <p>A goal in plain English becomes an approval-ready, typed <code>WorkflowSpec</code>. Healthy runs replay it with Playwright, zero reasoning calls. A break triggers a bounded, verified repair — not a re-plan.</p>
+    </div>
+    <div class="card accent">
+      <h3><span class="chip"></span>The outcome</h3>
+      <p>Cheaper, faster, auditable repeat runs; and when the web does change, a self-heal loop with an independent verifier before anything is trusted or auto-promoted.</p>
+    </div>
+  </div>
+
+  <h3 style="margin:20px 0 4px; font-size:13px;">A real run, including a real recovery</h3>
+  <div class="flow-steps">
+    <div class="flow-step"><div class="idx">1</div><div><b>First run (Discovery).</b> <span>Goal: "open Flipkart, extract the top 5 phones by price." The Navigator agent drives a real browser step by step and the run hits a "Are you a human?" interstitial.</span></div></div>
+    <div class="flow-step heal"><div class="idx">2</div><div><b>Self-heal.</b> <span>The Recovery agent diagnoses the block and patches the single failing step; an independent Verifier checks the patch in a sandbox replay before it's trusted (confidence 0.95).</span></div></div>
+    <div class="flow-step"><div class="idx">3</div><div><b>Promoted &amp; resumed.</b> <span>The patch is promoted to workflow v1.2 and the same run resumes and completes — no human paged for a low-risk, high-confidence fix.</span></div></div>
+    <div class="flow-step"><div class="idx">4</div><div><b>Every run after.</b> <span>v1.2 replays deterministically with Playwright — <code>modelCallCount = 0</code> — until the site changes again.</span></div></div>
+  </div>
+  <div class="pageno">WebPilot AI &nbsp;·&nbsp; <span class="brand">Architecture Report</span></div>
+</section>
+
+<!-- ================= 02 SYSTEM DESIGN ================= -->
+<section class="page">
+  <span class="kicker">02 · System Design</span>
+  <h2 class="head">Design principles that hold the platform together</h2>
+  <p class="lede">Four decisions shape everything else: workflows are typed and immutable, execution is deterministic by default, recovery is bounded and independently checked, and the browser's content is never trusted as instruction.</p>
+
+  <div class="grid2">
+    <div class="card">
+      <h3><span class="chip"></span>Typed, immutable WorkflowSpec</h3>
+      <p>A learned workflow is a Zod-validated, versioned document — never model-generated code. Nothing is ever passed to <code>eval()</code> or <code>new Function()</code>. Each repair creates a new immutable version (v1.0 → v1.1 → v1.2…), so any run can be traced back to the exact spec that produced it.</p>
+    </div>
+    <div class="card">
+      <h3><span class="chip"></span>Fast Path vs. Discovery</h3>
+      <p><strong>Discovery</strong> runs live, model-driven navigation to learn a workflow. <strong>Fast Path</strong> replays the stored spec with Playwright directly — zero Gemini calls — until a step's locator stops matching, which is the only trigger for falling back to reasoning.</p>
+    </div>
+    <div class="card">
+      <h3><span class="chip"></span>Bounded, verified self-healing</h3>
+      <p>Recovery only ever patches the one broken step — it cannot redesign the workflow. The patch is sandbox-replayed, then judged by a separate Verifier agent that never sees Recovery's reasoning, so the agent that wrote a fix can't be the one that approves it.</p>
+    </div>
+    <div class="card">
+      <h3><span class="chip"></span>Risk-gated autonomy</h3>
+      <p>A patch only auto-promotes on low risk + high verifier confidence. Anything else — high-risk actions (checkout, delete, pay), CAPTCHA/human-verification, low-confidence patches — pauses the run and creates a real Approval row for a human.</p>
+    </div>
+    <div class="card">
+      <h3><span class="chip"></span>Web content is untrusted evidence</h3>
+      <p>DOM text and screenshots are evidence for the Navigator to reason about, never instructions to follow — a prompt-injection boundary enforced in the agent contract, alongside SSRF/private-network/metadata blocking and an allowed-domain boundary the Planner can never widen.</p>
+    </div>
+    <div class="card">
+      <h3><span class="chip"></span>Multi-tenant by construction</h3>
+      <p>Workspace-scoped RBAC, an audit log, idempotency keys on every run, and worker leases with step checkpoints so a duplicate Cloud Tasks delivery or a second worker instance can never double-execute the same run.</p>
+    </div>
+  </div>
+  <div class="pageno">WebPilot AI &nbsp;·&nbsp; <span class="brand">Architecture Report</span></div>
+</section>
+
+<!-- ================= 03 ARCHITECTURE ================= -->
+<section class="page">
+  <span class="kicker">03 · System Architecture</span>
+  <h2 class="head">Five services, one typed control plane</h2>
+  <p class="lede">Independently deployed Cloud Run services and a private Playwright execution plane. Blue nodes are Google Cloud managed services, purple is the model, dark nodes are external systems the platform talks to.</p>
+  <div class="diagram-frame fill">
+    <pre class="mermaid" id="dg-arch">
+flowchart TD
+    U["User"] -->|"natural-language goal"| WEB["Next.js Web<br/>Cloud Run"]
+    WEB -->|"REST"| API["NestJS + Fastify API<br/>Cloud Run"]
+
+    API -->|"plan request"| GEMINI["Gemini 3.7 Flash<br/>via Google ADK / Vertex AI"]
+    API -->|"persist"| SQL[("Cloud SQL<br/>PostgreSQL")]
+    API -->|"dispatch run"| TASKS["Cloud Tasks"]
+    API -.->|"secrets by reference"| SECRETS[("Secret Manager")]
+
+    TASKS -->|"OIDC-authenticated"| WORKER["Browser Worker<br/>Playwright · Cloud Run (private)"]
+
+    WORKER -->|"learn / heal"| GEMINI
+    WORKER -->|"deterministic replay<br/>(0 Gemini calls)"| SITE["Target Website"]
+    WORKER -->|"screenshots · DOM · results"| GCS[("Cloud Storage")]
+    WORKER -->|"run events"| SQL
+    WORKER -->|"operational events"| PUBSUB["Pub/Sub"]
+
+    PUBSUB --> NOTIFIER["Notifier<br/>Cloud Run (private)"]
+    NOTIFIER --> SLACK["Slack"]
+    NOTIFIER --> GMAIL["Gmail"]
+    NOTIFIER --> CHAT["Google Chat"]
+
+    DEMO["Demo Portal<br/>V1 to V2 DOM drift"] -.->|"triggers self-heal demo"| WORKER
+
+    classDef gcp fill:#4285F4,stroke:#1a56c4,color:#fff
+    classDef ai fill:#8E24AA,stroke:#5e1877,color:#fff
+    classDef ext fill:#334155,stroke:#0f172a,color:#fff
+    class WEB,API,WORKER,NOTIFIER,SQL,TASKS,SECRETS,GCS,PUBSUB gcp
+    class GEMINI ai
+    class SITE,SLACK,GMAIL,CHAT,U ext
+    </pre>
+  </div>
+  <div class="pill-row">
+    <span class="pill">web — public</span><span class="pill">api — public</span><span class="pill">browser-worker — private, Cloud Tasks only</span>
+    <span class="pill">notifier — private, Pub/Sub only</span><span class="pill">demo-portal — public</span>
+  </div>
+  <div class="pageno">WebPilot AI &nbsp;·&nbsp; <span class="brand">Architecture Report</span></div>
+</section>
+
+<!-- ================= 04 SEQUENCE (LANDSCAPE) ================= -->
+<section class="page wide landscape">
+  <span class="kicker">04 · End-to-End Run Flow</span>
+  <h2 class="head">Discovery once, Fast Path forever, self-heal on demand</h2>
+  <p class="lede">One sequence covering all three modes: the first Discovery run that learns the workflow, a later Fast Path run with zero model calls, and a self-heal triggered by a site change — each independently verified before it's trusted.</p>
+  <div class="diagram-frame">
+    <pre class="mermaid" id="dg-seq">
+sequenceDiagram
+    actor U as User
+    participant API as API (Cloud Run)
+    participant G as Gemini 3.7 Flash
+    participant T as Cloud Tasks
+    participant W as Worker (Cloud Run, private)
+    participant S as Target Site
+    participant DB as Cloud SQL
+
+    U->>API: "open flipkart, extract top 5 phones by price"
+    API->>G: Planner: draft a plan + extraction schema
+    G-->>API: typed plan
+    API->>DB: save Agent + DRAFT version
+    U->>API: approve plan
+    API->>T: enqueue run (Discovery)
+    T->>W: OIDC-authenticated dispatch
+
+    rect rgb(30, 41, 59)
+    note over W,G: Discovery — Navigator drives the real browser
+    loop until done or 25 steps
+        W->>S: current page state (DOM + screenshot)
+        W->>G: Navigator: choose next action
+        G-->>W: NAVIGATE / CLICK / TYPE / EXTRACT / DONE
+        W->>S: execute action
+    end
+    end
+    W->>DB: save WorkflowSpec as v1.0 (PRODUCTION)
+
+    note over U,DB: — later, healthy repeat run —
+    U->>API: run again
+    API->>T: enqueue run (Fast Path)
+    T->>W: OIDC-authenticated dispatch
+    rect rgb(20, 60, 45)
+    note over W,S: Fast Path — zero Gemini calls
+    W->>S: replay v1.0's steps deterministically
+    end
+    W->>DB: save results (modelCallCount = 0)
+
+    note over U,DB: — site changes, next run —
+    W--xS: a step's locator no longer matches
+    rect rgb(80, 40, 20)
+    note over W,G: Self-heal
+    W->>G: Recovery: diagnose + minimal patch
+    G-->>W: WorkflowPatch
+    W->>W: sandbox-replay the patch
+    W->>G: Verifier: independently check the patch
+    G-->>W: PASS / FAIL
+    end
+    alt low risk + auto-promote
+        W->>DB: promote v1.1, resume same run
+    else needs a human
+        W->>DB: create Approval, pause run
+        U->>API: approve
+        API->>T: resume run
+    end
+    W-->>API: run COMPLETED
+    </pre>
+  </div>
+</section>
+
+<!-- ================= 05 AGENTS + SCHEDULING ================= -->
+<section class="page">
+  <span class="kicker">05 · AI Agents &amp; Async Dispatch</span>
+  <h2 class="head">Four narrow agents, one dispatch path</h2>
+  <p class="lede">Not one do-everything agent — four single-purpose Gemini calls, each with its own contract. Real <code>@google/adk</code> (<code>LlmAgent</code> + <code>InMemoryRunner</code>) and <code>@google/genai</code> (Vertex AI) calls, Zod-validated structured output, retries with backoff.</p>
+  <table>
+    <tr><th>Agent</th><th>Called from</th><th>Input</th><th>Output</th><th>Constraint</th></tr>
+    <tr><td><strong>Planner</strong></td><td>API, on agent creation</td><td>goal + target URL + allowed domains</td><td>a typed plan + extraction schema</td><td>can never widen the allowed-domain boundary</td></tr>
+    <tr><td><strong>Navigator</strong></td><td>Worker, during Discovery</td><td>current DOM (compacted) + screenshot + step history</td><td>exactly one next browser action, or "done"</td><td>webpage content is untrusted evidence, never an instruction</td></tr>
+    <tr><td><strong>Recovery</strong></td><td>Worker, on a Fast Path failure</td><td>the failed step + error + current DOM/screenshot</td><td>a minimal single-step patch</td><td>only touches the one broken step, never redesigns the workflow</td></tr>
+    <tr><td><strong>Verifier</strong></td><td>Worker, after a sandbox replay of a patch</td><td>the patch + the sandbox replay result</td><td>PASS/FAIL + confidence</td><td>independent of Recovery — cannot approve its own patch</td></tr>
+  </table>
+
+  <h3 style="margin:16px 0 4px; font-size:13px;">Every run takes the same dispatch path</h3>
+  <p class="lede" style="margin-top:0">Manual, scheduled, or Slack-triggered — nothing calls the browser worker directly.</p>
+  <div class="diagram-frame">
+    <pre class="mermaid" id="dg-sched">
+flowchart LR
+    SCHED["Cloud Scheduler<br/>(cron, OIDC-signed)"] -->|"POST .../trigger"| API
+    SLACK["/run agent-name<br/>(Slack, HMAC-verified)"] --> API["API<br/>creates a Run row"]
+    UI["Run Now<br/>(dashboard)"] --> API
+    API -->|"enqueue"| TQ["Cloud Tasks queue<br/>webpilot-runs"]
+    TQ -->|"OIDC-authenticated POST<br/>/internal/runs/:id/execute"| WORKER["Worker<br/>(private, Cloud Run)"]
+    </pre>
+  </div>
+  <div class="pageno">WebPilot AI &nbsp;·&nbsp; <span class="brand">Architecture Report</span></div>
+</section>
+
+<!-- ================= 06 SERVICES ================= -->
+<section class="page">
+  <span class="kicker">06 · Google Cloud Services</span>
+  <h2 class="head">What's actually running in production</h2>
+  <p class="lede">Every service below is live in the deployed environment — provisioned via <code>scripts/gcp-provision.sh</code>, deployed via <code>scripts/deploy.sh</code>, and mirrored as Terraform in <code>infra/terraform/main.tf</code>.</p>
+  <table>
+    <tr><th>Service</th><th>Role in WebPilot AI</th></tr>
+    <tr><td><strong>Cloud Run</strong></td><td>Hosts all 5 deployables: web (public), api (public), browser-worker (private, Cloud Tasks-only ingress), notifier (private, Pub/Sub-only), demo-portal (public, deterministic DOM-drift demo).</td></tr>
+    <tr><td><strong>Cloud SQL (PostgreSQL 17)</strong></td><td>Relational domain model via Prisma 7 — agents, immutable workflow versions, runs, run events, approvals, schedules, workspace/RBAC, audit log.</td></tr>
+    <tr><td><strong>Vertex AI / Gemini 3.7 Flash</strong></td><td>Model backend for all four agents (Planner, Navigator, Recovery, Verifier) via Google ADK's <code>LlmAgent</code> + <code>@google/genai</code>.</td></tr>
+    <tr><td><strong>Cloud Tasks</strong></td><td>Durable, OIDC-authenticated dispatch of every run (manual, scheduled, or Slack-triggered) from the API to the private worker.</td></tr>
+    <tr><td><strong>Cloud Scheduler</strong></td><td>Real cron jobs backing every user-created schedule, OIDC-signed, synced on create/update/delete — not a polling loop.</td></tr>
+    <tr><td><strong>Pub/Sub</strong></td><td>Operational event bus from the worker to the notifier (run completed/failed/needs-approval).</td></tr>
+    <tr><td><strong>Cloud Storage</strong></td><td>Run artifacts — screenshots, DOM snapshots, extraction results — served back to the UI via short-lived HMAC-signed URLs.</td></tr>
+    <tr><td><strong>Secret Manager</strong></td><td>Database URL, per-workspace Slack/Gmail/Chat OAuth credentials, created and read at runtime — no secrets in images or env files.</td></tr>
+    <tr><td><strong>Identity Platform / Firebase Auth</strong></td><td>Google sign-in, plus a custom-token bridge (<code>createCustomToken</code>) for the email/password login path.</td></tr>
+    <tr><td><strong>Artifact Registry</strong></td><td>Docker image storage for all 5 services, built by Cloud Build.</td></tr>
+    <tr><td><strong>Cloud Build</strong></td><td>Builds and pushes each service image; incremental configs so a change to one service doesn't rebuild all five.</td></tr>
+    <tr><td><strong>IAM</strong></td><td>Seven least-privilege service accounts (web, api, worker, notifier, plus three invoker-only identities for Tasks/Scheduler/Pub-Sub) — no service holds <code>roles/editor</code> or <code>roles/owner</code>.</td></tr>
+  </table>
+  <div class="pageno">WebPilot AI &nbsp;·&nbsp; <span class="brand">Architecture Report</span></div>
+</section>
+
+<!-- ================= 07 IMPLEMENTATION STATUS ================= -->
+<section class="page">
+  <span class="kicker">07 · Implementation Status</span>
+  <h2 class="head">What's actually implemented</h2>
+  <p class="lede">Every item below exists in the running code and the live deployment — nothing here is aspirational.</p>
+  <div class="grid2">
+    <div class="card">
+      <h3><span class="chip"></span>Core execution</h3>
+      <p>Typed <code>WorkflowSpec</code>, deterministic Playwright execution, no <code>eval()</code>/<code>new Function()</code> model-code execution. Zero-reasoning fast path on healthy repeat runs. Immutable agent versions with manual draft editing and activation.</p>
+    </div>
+    <div class="card">
+      <h3><span class="chip"></span>Self-healing</h3>
+      <p>Failure checkpoint → screenshot/DOM context → minimal repair → sandbox replay → independent verifier → low-risk auto-promotion or human approval → resume same run.</p>
+    </div>
+    <div class="card">
+      <h3><span class="chip"></span>Human-in-the-loop</h3>
+      <p>Plan approval, high-risk action approval, recovery approval, CAPTCHA/human-verification pause — real approval rows, not fire-and-forget automation.</p>
+    </div>
+    <div class="card">
+      <h3><span class="chip"></span>Security</h3>
+      <p>SSRF/private-network/metadata blocking in production, redirect/browser-request guard, allowed-domain boundary, web-content prompt-injection boundary, secret redaction.</p>
+    </div>
+    <div class="card">
+      <h3><span class="chip"></span>Integrations</h3>
+      <p>Slack OAuth with signed/expiring state and signed slash commands scoped to the connected workspace, Slack notifications, Gmail and Google Chat adapters.</p>
+    </div>
+    <div class="card">
+      <h3><span class="chip"></span>Multi-tenancy</h3>
+      <p>Workspace RBAC, audit log, idempotency keys, worker leases and step checkpoints, per-workspace login-method controls.</p>
+    </div>
+  </div>
+  <div class="footnote">WebPilot AI — All Things Agentic Hackathon submission. Generated from the live README and production deployment.</div>
+  <div class="pageno">WebPilot AI &nbsp;·&nbsp; <span class="brand">Architecture Report</span></div>
+</section>
+
+<script>
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: "neutral",
+    securityLevel: "loose",
+    themeVariables: { fontFamily: "Inter, sans-serif", primaryColor: "#4285F4" },
+    flowchart: { htmlLabels: true, curve: "basis" },
+    sequence: { useMaxWidth: false, actorFontSize: 15, messageFontSize: 14, noteFontSize: 14, wrap: true, boxMargin: 10 },
+  });
+</script>
+</body>
+</html>
