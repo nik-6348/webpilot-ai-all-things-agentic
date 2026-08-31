@@ -126,9 +126,36 @@ export async function extractRecords(page: Page, schema: ExtractionSchema, maxCo
         // Find rating pattern (e.g. 4.5 ★ or 4.5/5)
         const ratingLine = lines.find(l => /[\d\.]+\s?★|[\d\.]+\s?out of\s?5/i.test(l)) || "";
 
-        // Find main title/name (usually longest prominent line or header tag)
-        const headerEl = el.querySelector("h1, h2, h3, h4, [class*='title'], [class*='name'], a");
-        const titleText = headerEl?.textContent?.trim() || lines[0] || `Item ${idx + 1}`;
+        // Find main title/name. Explicit heading/title/name-class elements
+        // are tried FIRST via separate queries -- a single combined
+        // selector ("h1, h2, ..., a") matches in document order, not
+        // selector priority, so on sites that wrap an entire product card
+        // in one big <a> (common on e-commerce listings), that anchor
+        // would win and its full textContent (title + ratings + specs +
+        // price + "Add to Compare" + offers, all concatenated) would
+        // become the "title". Falling back to an anchor, prefer its
+        // title/aria-label attribute (commonly just the clean product
+        // name even when the visible text is the whole card) over its
+        // full text, and only ever fall back to one line, never the
+        // whole blob.
+        const headingEl = el.querySelector("h1, h2, h3, h4, [class*='title'], [class*='name']");
+        let titleText = headingEl?.textContent?.trim() || "";
+        if (!titleText) {
+          const anchorEl = el.querySelector("a") as HTMLAnchorElement | null;
+          titleText =
+            anchorEl?.title?.trim() ||
+            anchorEl?.getAttribute("aria-label")?.trim() ||
+            "";
+        }
+        if (!titleText) titleText = lines[0] || `Item ${idx + 1}`;
+
+        // Common e-commerce CTA/status noise that should never stand in
+        // for a real content field (e.g. "snippet" falling back to
+        // whichever line isn't the title/price -- often the first line
+        // rendered, which is frequently a compare-checkbox label or a
+        // stock-status badge, not a description).
+        const isNoiseLine = (l: string) =>
+          /^(add to compare|compare|wishlist|currently unavailable|only \d+ left|out of stock|sold out)$/i.test(l.trim());
 
         const itemObj: Record<string, any> = {};
 
@@ -137,17 +164,18 @@ export async function extractRecords(page: Page, schema: ExtractionSchema, maxCo
           if (fieldKey.includes("url") || fieldKey.includes("link")) {
             itemObj[f.name] = linkHref || window.location.href;
           } else if (fieldKey.includes("price") || fieldKey.includes("amount") || fieldKey.includes("inr")) {
-            itemObj[f.name] = priceLine || lines.find(l => /\d/.test(l)) || "N/A";
+            itemObj[f.name] = priceLine || lines.find(l => /\d/.test(l) && !isNoiseLine(l)) || "N/A";
           } else if (fieldKey.includes("rating") || fieldKey.includes("score")) {
             itemObj[f.name] = ratingLine || "N/A";
           } else if (fieldKey.includes("rank") || fieldKey.includes("position")) {
             itemObj[f.name] = `#${idx + 1}`;
           } else if (fieldKey.includes("name") || fieldKey.includes("title") || fieldKey.includes("product")) {
             itemObj[f.name] = titleText;
-          } else if (fieldKey.includes("spec") || fieldKey.includes("desc") || fieldKey.includes("feature")) {
-            itemObj[f.name] = lines.slice(1, 4).join(" | ") || titleText;
+          } else if (fieldKey.includes("spec") || fieldKey.includes("desc") || fieldKey.includes("feature") || fieldKey.includes("snippet")) {
+            const specLines = lines.filter(l => l !== titleText && l !== priceLine && l !== ratingLine && !isNoiseLine(l));
+            itemObj[f.name] = specLines.slice(0, 3).join(" | ") || titleText;
           } else {
-            itemObj[f.name] = lines.find(l => l !== titleText && l !== priceLine) || titleText;
+            itemObj[f.name] = lines.find(l => l !== titleText && l !== priceLine && !isNoiseLine(l)) || titleText;
           }
         }
         return itemObj;
