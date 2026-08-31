@@ -81,10 +81,19 @@ export default function NewAgent() {
         const domainMatch = singlePrompt.match(/((?:[a-zA-Z0-9-]+\.)+[a-zA-Z]{2,})/i);
         if (domainMatch) {
           extractedUrl = `https://${domainMatch[0]}`;
-        } else if (singlePrompt.toLowerCase().includes("flipkart")) {
-          extractedUrl = "https://www.flipkart.com";
-        } else if (singlePrompt.toLowerCase().includes("amazon")) {
-          extractedUrl = "https://www.amazon.in";
+        } else {
+          // The goal often names a well-known site rather than its URL
+          // (e.g. "Open Automation Exercise...", "search Flipkart for...")
+          // -- no domain-shaped token for the regex above to catch at all.
+          const lower = singlePrompt.toLowerCase();
+          const KNOWN_SITES: [string, string][] = [
+            ["flipkart", "https://www.flipkart.com"],
+            ["amazon", "https://www.amazon.in"],
+            ["automation exercise", "https://automationexercise.com"],
+            ["nopcommerce", "https://demo.nopcommerce.com"],
+          ];
+          const known = KNOWN_SITES.find(([name]) => lower.includes(name));
+          if (known) extractedUrl = known[1];
         }
       }
 
