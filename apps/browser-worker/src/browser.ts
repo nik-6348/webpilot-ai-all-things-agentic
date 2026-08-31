@@ -281,6 +281,14 @@ export async function executeStep(
           }
         } catch {}
       }
-      return;
+      // On replay (fast path / recovery), a persisted DONE step's value is
+      // stale by design (see the EXTRACT case above) and is never trusted
+      // here either — but unlike EXTRACT, DONE previously had no fallback
+      // at all, so a workflow whose Navigator combined "done" and
+      // "extracted" into one DONE step (rather than two separate EXTRACT
+      // then DONE steps) would silently return zero records on every
+      // future fast-path run. Fall back to the same live heuristic scrape
+      // EXTRACT uses.
+      return extractRecords(page, schema);
   }
 }
