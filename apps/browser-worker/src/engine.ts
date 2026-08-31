@@ -444,6 +444,21 @@ async function discover(
     }
     if (!learned.length) throw new Error("Navigator produced no workflow");
 
+    if (!extracted || extracted.length === 0) {
+      for (let i = learned.length - 1; i >= 0; i--) {
+        const step = learned[i];
+        if (step?.value && typeof step.value === "string" && step.value.trim().startsWith("[")) {
+          try {
+            const parsed = JSON.parse(step.value);
+            if (Array.isArray(parsed) && parsed.length > 0) {
+              extracted = parsed;
+              break;
+            }
+          } catch {}
+        }
+      }
+    }
+
     // Validate schema validation BEFORE compiling/creating a PRODUCTION version of the agent
     const schemaObj = planned.extractionSchema as any;
     const fields = schemaObj?.fields || [];

@@ -265,6 +265,14 @@ export async function executeStep(
       return extractRecords(page, schema);
     }
     case "DONE":
+      if (step.value && typeof step.value === "string" && step.value.trim().startsWith("[")) {
+        try {
+          const parsed = JSON.parse(step.value);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            return parsed;
+          }
+        } catch {}
+      }
       return;
   }
 }
