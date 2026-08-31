@@ -228,7 +228,15 @@ export class RunsController {
     if (!artifactPath) return res.status(400).send("Path query parameter required");
     // Artifact paths must belong to this run — never trust a client-supplied
     // path into another run/agent's artifacts (was a public, unscoped IDOR).
-    if (!artifactPath.startsWith(`runs/${id}/`))
+    // ArtifactStore.put() stores refs as full gs://bucket/key or file://path
+    // URIs (not bare keys), so the ownership check has to strip that prefix
+    // the same way ArtifactStore.get() does before comparing.
+    const ownsArtifact = artifactPath.startsWith("gs://")
+      ? artifactPath.split("/").slice(3).join("/").startsWith(`runs/${id}/`)
+      : artifactPath.startsWith("file://")
+        ? artifactPath.replace(/\\/g, "/").includes(`/runs/${id}/`)
+        : artifactPath.startsWith(`runs/${id}/`);
+    if (!ownsArtifact)
       return res.status(403).send("Artifact does not belong to this run");
 
     // This route has to be reachable without an Authorization header
