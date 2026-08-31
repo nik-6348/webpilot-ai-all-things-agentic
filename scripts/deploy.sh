@@ -24,7 +24,7 @@ TASK_SA="webpilot-task-invoker@${PROJECT_ID}.iam.gserviceaccount.com"
 SCHED_SA="webpilot-scheduler-invoker@${PROJECT_ID}.iam.gserviceaccount.com"
 PUBSUB_SA="webpilot-pubsub-invoker@${PROJECT_ID}.iam.gserviceaccount.com"
 
-SHA=$(git rev-parse --short HEAD)
+SHA="${SHA:-$(git rev-parse --short HEAD)}"
 
 # SKIP_BUILD=true reuses images already built+pushed by
 # scripts/cloudbuild-images.yaml (Cloud Build has much better network
