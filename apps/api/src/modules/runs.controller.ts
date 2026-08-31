@@ -125,7 +125,13 @@ export class RunsController {
       // requireWorkspace (below), so minting a signature here is the one
       // and only authorization check; the artifact endpoint itself trusts
       // any signature that verifies.
-      const expiresAt = Date.now() + 15 * 60_000;
+      // 15 minutes was too short for real use -- a user reviewing a
+      // completed run's screenshots later (not actively polling, since
+      // polling stops once a run reaches a terminal status) would hit an
+      // expired link constantly. 6 hours balances "don't hand out a
+      // long-lived credential" against "actually usable after the run
+      // finishes"; reloading the run page always mints a fresh one anyway.
+      const expiresAt = Date.now() + 6 * 60 * 60_000;
       const sig = signArtifactAccess(run.id, ref, expiresAt);
       return `${apiBase}/api/v1/runs/${run.id}/artifact?path=${encodeURIComponent(ref)}&exp=${expiresAt}&sig=${sig}`;
     };

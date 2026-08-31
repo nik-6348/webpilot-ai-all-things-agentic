@@ -10,9 +10,65 @@ Running now on Google Cloud (Cloud Run + Cloud SQL + Vertex AI + Cloud Tasks + P
 
 - **App:** https://webpilot-web-536937000866.us-central1.run.app
 - **API + Swagger:** https://webpilot-api-536937000866.us-central1.run.app/docs
-- **Demo portal (DOM-drift trigger):** https://webpilot-demo-536937000866.us-central1.run.app
 
 Sign in with Google to try it. The worker and notifier are intentionally private (Cloud Tasks/Pub/Sub only, no public ingress).
+
+## Why this is different
+
+Most "AI browser agents" reason on every single run — slow, expensive, and one bad model response away from clicking the wrong thing. WebPilot only reasons **once**:
+
+| | First run | Every run after |
+|---|---|---|
+| **How it navigates** | Gemini 3.7 Flash plans and drives the browser live, step by step | Frozen, typed `WorkflowSpec` replayed deterministically with Playwright |
+| **Gemini calls** | As many as it takes to learn the task | **Zero** |
+| **What happens when the site changes** | N/A — this *is* the learning run | Detected automatically → Gemini writes a minimal patch → replayed in a sandbox → an independent second model verifies it → promoted to a new immutable version → the same run resumes where it failed |
+
+That last row is the core bet: self-healing isn't "just retry with AI" — it's diagnose → patch → sandbox-verify → independently-verify → version → resume, with a human approval gate for anything above low risk.
+
+## Feature highlights
+
+- 🧠 **Teach once, replay free** — Google ADK Planner + live Navigator learn a task against a real browser; every healthy repeat run costs zero Gemini calls.
+- 🩹 **Self-healing, not self-guessing** — a failed step never just retries; it goes through diagnose → patch → sandbox replay → independent verifier → versioned promotion → resume, all recorded and inspectable.
+- 🔒 **Nothing the model writes ever executes** — the learned workflow is a typed, validated spec. No `eval()`, no `new Function()`, model output is data, never code.
+- 🛑 **Humans stay in the loop** — plan approval, high-risk-action approval, recovery approval, and CAPTCHA/human-verification checkpoints all pause the run for a real person.
+- 🏗️ **Actually deployed on Google Cloud** — Cloud Run (5 services), Cloud SQL, Cloud Tasks, Pub/Sub, Secret Manager, Artifact Registry, least-privilege IAM per service — not just described, [live right now](#live-deployment).
+- 📦 **Immutable versions** — every learned or healed workflow is a new version; nothing is overwritten, everything is auditable and rollback-able.
+- 🔔 **Notifications where your team already is** — Slack (OAuth + signed slash commands), Gmail API, Google Chat.
+
+## Architecture
+
+```mermaid
+flowchart TD
+    U["👤 User"] -->|"natural-language goal"| WEB["Next.js Web<br/>Cloud Run"]
+    WEB -->|"REST"| API["NestJS + Fastify API<br/>Cloud Run"]
+
+    API -->|"plan request"| GEMINI["✨ Gemini 3.7 Flash<br/>via Google ADK / Vertex AI"]
+    API -->|"persist"| SQL[("Cloud SQL<br/>PostgreSQL")]
+    API -->|"dispatch run"| TASKS["Cloud Tasks"]
+    API -.->|"secrets by reference"| SECRETS[("Secret Manager")]
+
+    TASKS -->|"OIDC-authenticated"| WORKER["Browser Worker<br/>Playwright · Cloud Run (private)"]
+
+    WORKER -->|"learn / heal"| GEMINI
+    WORKER -->|"deterministic replay<br/>(0 Gemini calls)"| SITE["🌐 Target Website"]
+    WORKER -->|"screenshots · DOM · results"| GCS[("Cloud Storage")]
+    WORKER -->|"run events"| SQL
+    WORKER -->|"operational events"| PUBSUB["Pub/Sub"]
+
+    PUBSUB --> NOTIFIER["Notifier<br/>Cloud Run (private)"]
+    NOTIFIER --> SLACK["💬 Slack"]
+    NOTIFIER --> GMAIL["✉️ Gmail"]
+    NOTIFIER --> CHAT["🗨️ Google Chat"]
+
+    DEMO["Demo Portal<br/>V1 ⇄ V2 DOM drift"] -.->|"triggers self-heal demo"| WORKER
+
+    classDef gcp fill:#4285F4,stroke:#1a56c4,color:#fff
+    classDef ai fill:#8E24AA,stroke:#5e1877,color:#fff
+    classDef ext fill:#334155,stroke:#0f172a,color:#fff
+    class WEB,API,WORKER,NOTIFIER,SQL,TASKS,SECRETS,GCS,PUBSUB gcp
+    class GEMINI ai
+    class SITE,SLACK,GMAIL,CHAT,U ext
+```
 
 ## What is implemented
 
