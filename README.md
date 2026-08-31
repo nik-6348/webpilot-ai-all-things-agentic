@@ -70,6 +70,103 @@ flowchart TD
     class SITE,SLACK,GMAIL,CHAT,U ext
 ```
 
+## How a run actually works, end to end
+
+```mermaid
+sequenceDiagram
+    actor U as User
+    participant API as API (Cloud Run)
+    participant G as Gemini 3.7 Flash
+    participant T as Cloud Tasks
+    participant W as Worker (Cloud Run, private)
+    participant S as Target Site
+    participant DB as Cloud SQL
+
+    U->>API: "open flipkart, extract top 5 phones by price"
+    API->>G: Planner: draft a plan + extraction schema
+    G-->>API: typed plan
+    API->>DB: save Agent + DRAFT version
+    U->>API: approve plan
+    API->>T: enqueue run (Discovery)
+    T->>W: OIDC-authenticated dispatch
+
+    rect rgb(30, 41, 59)
+    note over W,G: Discovery — Navigator drives the real browser
+    loop until done or 25 steps
+        W->>S: current page state (DOM + screenshot)
+        W->>G: Navigator: choose next action
+        G-->>W: NAVIGATE / CLICK / TYPE / EXTRACT / DONE
+        W->>S: execute action
+    end
+    end
+    W->>DB: save WorkflowSpec as v1.0 (PRODUCTION)
+
+    note over U,DB: — later, healthy repeat run —
+    U->>API: run again
+    API->>T: enqueue run (Fast Path)
+    T->>W: OIDC-authenticated dispatch
+    rect rgb(20, 60, 45)
+    note over W,S: Fast Path — zero Gemini calls
+    W->>S: replay v1.0's steps deterministically
+    end
+    W->>DB: save results (modelCallCount = 0)
+
+    note over U,DB: — site changes, next run —
+    W--xS: a step's locator no longer matches
+    rect rgb(80, 40, 20)
+    note over W,G: Self-heal
+    W->>G: Recovery: diagnose + minimal patch
+    G-->>W: WorkflowPatch
+    W->>W: sandbox-replay the patch
+    W->>G: Verifier: independently check the patch
+    G-->>W: PASS / FAIL
+    end
+    alt low risk + auto-promote
+        W->>DB: promote v1.1, resume same run
+    else needs a human
+        W->>DB: create Approval, pause run
+        U->>API: approve
+        API->>T: resume run
+    end
+    W-->>API: run COMPLETED
+```
+
+## AI agents — what each one actually does
+
+Four narrow, single-purpose Gemini calls, not one do-everything agent — each has its own contract and only sees what it needs:
+
+| Agent | Called from | Input | Output | Constraint |
+|---|---|---|---|---|
+| **Planner** | API, on agent creation | goal + target URL + allowed domains | a typed plan + extraction schema | can never widen the allowed-domain boundary |
+| **Navigator** | Worker, during Discovery | current DOM (compacted) + screenshot + step history | exactly one next browser action, or "done" | webpage content is treated as untrusted evidence, never as an instruction |
+| **Recovery** | Worker, on a Fast Path failure | the failed step + error + current DOM/screenshot | a minimal single-step patch | only touches the one broken step, never redesigns the workflow |
+| **Verifier** | Worker, after a sandbox replay of a patch | the patch + the sandbox replay result | PASS/FAIL + confidence | independent of Recovery — the agent that wrote the patch cannot approve its own patch |
+
+Real `@google/adk` (`LlmAgent` + `InMemoryRunner`) and `@google/genai` (Vertex AI) calls, with a persistent ADK session kept alive across one Discovery run's whole step loop (not re-created per call), Zod-validated structured output, and retries with backoff on both the ADK and direct-SDK paths.
+
+## Scheduling & async execution
+
+Every run — manual, scheduled, or Slack-triggered — goes through the same dispatch path; nothing calls the browser worker directly:
+
+```mermaid
+flowchart LR
+    SCHED["⏰ Cloud Scheduler<br/>(cron, OIDC-signed)"] -->|"POST .../trigger"| API
+    SLACK["/run agent-name<br/>(Slack, HMAC-verified)"] --> API["API<br/>creates a Run row"]
+    UI["Run Now<br/>(dashboard)"] --> API
+    API -->|"enqueue"| TQ["Cloud Tasks queue<br/>webpilot-runs"]
+    TQ -->|"OIDC-authenticated POST<br/>/internal/runs/:id/execute"| WORKER["Worker<br/>(private, Cloud Run)"]
+```
+
+- Creating a schedule in the UI creates a **real Cloud Scheduler job** (`packages/gcp` `SchedulerService`), not just a database row — editing the cron/timezone re-syncs the actual job, and disabling a schedule is checked before the trigger endpoint will create a run.
+- Cloud Scheduler and Cloud Tasks both authenticate with a signed Google OIDC token verified server-side (`google-auth-library`) — no shared secret, no API key.
+- `Run.idempotencyKey` and `leaseOwner`/`leaseExpiresAt` prevent a duplicate Cloud Tasks delivery or a second worker instance from double-executing the same run.
+
+## Infrastructure as code
+
+`infra/terraform/main.tf` declares the full target topology as Terraform: Cloud SQL (Postgres 17, automated backups + PITR), a GCS bucket with a 90-day artifact lifecycle rule, the Cloud Tasks queue, the Pub/Sub topic, Secret Manager (the database URL, plus version-less containers for Slack/Gmail/Chat credentials an operator fills in later), Firebase project + Identity Platform config for Google sign-in, and **seven** distinct least-privilege service accounts (`web`, `api`, `worker`, `notifier`, plus three invoker-only identities for Cloud Tasks/Scheduler/Pub/Sub) — no service holds `roles/editor` or `roles/owner`.
+
+The live deployment linked above was actually brought up with [`scripts/gcp-provision.sh`](scripts/gcp-provision.sh) + [`scripts/deploy.sh`](scripts/deploy.sh), the imperative `gcloud`-based equivalent of that same Terraform plan (Terraform itself wasn't available in the environment this was deployed from) — both provision and grant IAM for the identical set of resources described above, and are safe to re-run.
+
 ## What is implemented
 
 - Separate deployables: Next.js web, NestJS/Fastify control API, Fastify/Playwright browser worker, notification worker, reproducible demo portal.
@@ -234,11 +331,3 @@ Use [`scripts/configure-integrations.sh`](scripts/configure-integrations.sh) aft
 ## Validation status
 
 Live-verified on the deployment linked above, not just built: a real discovery run (Gemini plans + navigates + extracts against a real target site), a fast-path replay of the same agent with `modelCallCount: 0`, and the self-healing loop against the demo portal's V1→V2 DOM drift (failure detected → recovery patch → sandbox replay → independent verifier → new version promoted → run resumes) were all exercised end-to-end against the live Cloud Run deployment. `pnpm install && pnpm build` passes clean from a fully fresh state (all `dist/`/generated output removed first) — see [`docs/VALIDATION.md`](docs/VALIDATION.md) for the full local build/lint/typecheck gate.
-
-## Hackathon demo
-
-See [`docs/hackathon/DEMO.md`](docs/hackathon/DEMO.md).
-
-The core demo story is intentionally simple and auditable:
-
-> AI learns a real web workflow once. Healthy repeats run without model reasoning. The web changes. Gemini wakes up, repairs only the broken step, an independent verifier checks it, a new immutable version is promoted, and the operation finishes.
