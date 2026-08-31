@@ -49,7 +49,7 @@ function verifyPassword(password: string, stored: string): boolean {
 
 export { hashPassword };
 
-@Controller("api/v1/auth")
+@Controller("auth")
 export class AuthController {
   constructor(private emailService: EmailService) {}
 
