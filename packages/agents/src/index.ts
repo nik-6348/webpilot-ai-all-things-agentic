@@ -477,7 +477,7 @@ export async function navigateDiscovery(input: {
 
   const parts: any[] = [
     {
-      text: `Choose exactly one next safe browser action. Prefer robust accessible locators. Mark done only when the requested data is extracted. ${WEB_CONTENT_BOUNDARY}\n${JSON.stringify({ ...input, screenshotBase64: undefined })}`,
+      text: `Choose exactly one next safe browser action. Prefer robust accessible locators. Mark done only when the requested data is extracted. When you set type to EXTRACT or DONE with done=true, you MUST put the extracted records as a JSON array string in "value", one object per record, using exactly the field names given in "schema" (not any other names) — this is the only way the extracted data is actually saved; a prose description in "description"/"rationale" is discarded. If a field has no value for a record, use an empty string rather than omitting the key. ${WEB_CONTENT_BOUNDARY}\n${JSON.stringify({ ...input, screenshotBase64: undefined })}`,
     },
   ];
 
