@@ -1,4 +1,5 @@
 import "./globals.css";
+import { ToastProvider } from "../components/Toast";
 export const metadata = {
   title: "WebPilot AI",
   description: "Autonomous web operations that learn, compile and self-heal.",
@@ -10,7 +11,9 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
-      <body>{children}</body>
+      <body>
+        <ToastProvider>{children}</ToastProvider>
+      </body>
     </html>
   );
 }

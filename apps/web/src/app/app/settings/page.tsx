@@ -26,8 +26,17 @@ import {
   Shield
 } from "lucide-react";
 import { api, workspace } from "../../../lib/api";
+import { useToast } from "../../../components/Toast";
+import { ConfirmDialog } from "../../../components/ConfirmDialog";
 
 export default function SettingsPage() {
+  const toast = useToast();
+  const [confirmDialog, setConfirmDialog] = useState<
+    | { type: "remove-member"; userId: string }
+    | { type: "cleanup" }
+    | { type: "factory-reset" }
+    | null
+  >(null);
   const [saved, setSaved] = useState(false);
   const [retentionPeriod, setRetentionPeriod] = useState("7");
   const [autoCleanup, setAutoCleanup] = useState(true);
@@ -109,7 +118,7 @@ export default function SettingsPage() {
       setSaved(true);
       setTimeout(() => setSaved(false), 3000);
     } catch (err: any) {
-      alert(err.message || "Failed to update login method settings");
+      toast.error(err.message || "Failed to update login method settings");
     }
   }
 
@@ -135,7 +144,7 @@ export default function SettingsPage() {
       setNewRole("OPERATOR");
       loadMembers();
     } catch (err: any) {
-      alert(err.message || "Failed to add member");
+      toast.error(err.message || "Failed to add member");
     }
   }
 
@@ -151,7 +160,7 @@ export default function SettingsPage() {
       });
       loadMembers();
     } catch (err: any) {
-      alert(err.message || "Failed to update user status");
+      toast.error(err.message || "Failed to update user status");
     }
   }
 
@@ -169,27 +178,34 @@ export default function SettingsPage() {
       });
       setShowPasswordModal(null);
       setResetPass("");
-      alert("User password updated successfully!");
+      toast.success("User password updated successfully.");
     } catch (err: any) {
-      alert(err.message || "Failed to update password");
+      toast.error(err.message || "Failed to update password");
     }
   }
 
-  async function handleRemoveMember(userId: string) {
-    if (!confirm("Are you sure you want to remove this member from the workspace?")) return;
+  function handleRemoveMember(userId: string) {
+    setConfirmDialog({ type: "remove-member", userId });
+  }
+
+  async function doRemoveMember(userId: string) {
     try {
       const w = await workspace();
       await api(`/api/v1/workspaces/members/${userId}?workspaceId=${w?.id}`, {
         method: "DELETE",
       });
+      toast.success("Member removed from workspace.");
       loadMembers();
     } catch (err: any) {
-      alert(err.message || "Failed to remove member");
+      toast.error(err.message || "Failed to remove member");
     }
   }
 
-  async function handleTriggerCleanup() {
-    if (!confirm(`Purge all screenshots, logs, and run artifacts older than ${retentionPeriod} days?`)) return;
+  function handleTriggerCleanup() {
+    setConfirmDialog({ type: "cleanup" });
+  }
+
+  async function doTriggerCleanup() {
     setPurging(true);
     try {
       const w = await workspace();
@@ -198,18 +214,22 @@ export default function SettingsPage() {
         method: "POST",
         body: JSON.stringify({ target: "RUNS", retentionDays: Number(retentionPeriod) }),
       });
-      alert(`Cleanup completed! ${res.purgedCount || 0} run artifacts purged.`);
+      toast.success(`Cleanup completed — ${res.purgedCount || 0} run artifacts purged.`);
     } catch (err: any) {
-      alert(`Cleanup notice: System artifacts processed.`);
+      // Show the real failure instead of a reassuring-sounding fixed
+      // string — this used to say "System artifacts processed." even when
+      // the request failed outright.
+      toast.error(err.message || "Cleanup failed");
     } finally {
       setPurging(false);
     }
   }
 
-  async function handleFactoryReset() {
-    const input = prompt("DANGER: Factory Reset will permanently purge all agent configurations, execution runs, schedules, and scripts! Type OK to proceed:");
-    if (input !== "OK") return;
+  function handleFactoryReset() {
+    setConfirmDialog({ type: "factory-reset" });
+  }
 
+  async function doFactoryReset() {
     setPurging(true);
     try {
       const w = await workspace();
@@ -218,9 +238,11 @@ export default function SettingsPage() {
         method: "POST",
         body: JSON.stringify({ target: "FACTORY_RESET" }),
       });
-      alert(`Factory reset complete! ${res.purgedCount || 0} entities reset.`);
+      toast.success(`Factory reset complete — ${res.purgedCount || 0} entities reset.`);
     } catch (err: any) {
-      alert(`Factory reset initiated.`);
+      // Same fix as cleanup: this is the single most destructive action in
+      // the app — it must never hide a real failure behind "initiated."
+      toast.error(err.message || "Factory reset failed");
     } finally {
       setPurging(false);
     }
@@ -637,6 +659,50 @@ export default function SettingsPage() {
           </div>
         </div>
       )}
+
+      <ConfirmDialog
+        open={confirmDialog?.type === "remove-member"}
+        title="Remove member"
+        description="They will immediately lose access to this workspace, its agents, and its run history."
+        confirmLabel="Remove"
+        onConfirm={() => {
+          if (confirmDialog?.type === "remove-member") doRemoveMember(confirmDialog.userId);
+          setConfirmDialog(null);
+        }}
+        onCancel={() => setConfirmDialog(null)}
+      />
+
+      <ConfirmDialog
+        open={confirmDialog?.type === "cleanup"}
+        title="Purge old run artifacts"
+        description={`Screenshots, logs, and run artifacts older than ${retentionPeriod} days will be permanently deleted for every agent in this workspace.`}
+        impact={["This cannot be undone."]}
+        confirmLabel="Purge"
+        onConfirm={() => {
+          doTriggerCleanup();
+          setConfirmDialog(null);
+        }}
+        onCancel={() => setConfirmDialog(null)}
+      />
+
+      <ConfirmDialog
+        open={confirmDialog?.type === "factory-reset"}
+        title="Factory reset"
+        description="This permanently deletes every agent, version, run, and schedule in this workspace. This is the most destructive action in WebPilot AI."
+        impact={[
+          "All agent configurations will be deleted",
+          "All execution history will be deleted",
+          "All schedules will be deleted",
+          "This cannot be undone",
+        ]}
+        confirmLabel="Factory reset"
+        typedConfirmation="RESET"
+        onConfirm={() => {
+          doFactoryReset();
+          setConfirmDialog(null);
+        }}
+        onCancel={() => setConfirmDialog(null)}
+      />
     </div>
   );
 }

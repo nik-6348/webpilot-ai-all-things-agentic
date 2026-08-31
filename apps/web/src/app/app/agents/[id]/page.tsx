@@ -32,16 +32,21 @@ import {
 } from "lucide-react";
 import { api } from "../../../../lib/api";
 import { ScheduleModal } from "../../../../components/ScheduleModal";
+import { useToast } from "../../../../components/Toast";
+import { ConfirmDialog } from "../../../../components/ConfirmDialog";
 
 export default function AgentDetail() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
+  const toast = useToast();
   const [agent, setAgent] = useState<any>(null);
   const [approval, setApproval] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [copiedCode, setCopiedCode] = useState(false);
   const [showScheduleModal, setShowScheduleModal] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [showDeleteVersionConfirm, setShowDeleteVersionConfirm] = useState(false);
 
   // Form states
   const [name, setName] = useState("");
@@ -143,7 +148,7 @@ export default function AgentDetail() {
         await loadData();
       }
     } catch (e: any) {
-      alert(`Approval error: ${e.message}`);
+      toast.error(`Approval error: ${e.message}`);
     }
   }
 
@@ -162,7 +167,7 @@ export default function AgentDetail() {
         setRunningAgent(false);
       }
     } catch (e: any) {
-      alert(`Run launch error: ${e.message}`);
+      toast.error(`Run launch error: ${e.message}`);
       setRunningAgent(false);
     }
   }
@@ -199,22 +204,26 @@ export default function AgentDetail() {
           body: JSON.stringify({ workflowSpec: updatedSpec }),
         });
       }
-      alert("Prompt & Schema updated successfully!");
+      toast.success("Prompt & schema updated successfully.");
       await loadData();
     } catch (e: any) {
-      alert(`Save error: ${e.message}`);
+      toast.error(`Save error: ${e.message}`);
     } finally {
       setSaving(false);
     }
   }
 
-  async function handleDeleteAgent() {
-    if (!confirm(`Are you sure you want to delete scraper agent "${agent?.name}"?`)) return;
+  function handleDeleteAgent() {
+    setShowDeleteConfirm(true);
+  }
+
+  async function doDeleteAgent() {
     try {
       await api(`/api/v1/agents/${id}`, { method: "DELETE" });
+      toast.success(`Agent "${agent?.name}" deleted.`);
       router.push("/app/agents");
     } catch (e: any) {
-      alert(`Delete error: ${e.message}`);
+      toast.error(`Delete error: ${e.message}`);
     }
   }
 
@@ -227,17 +236,17 @@ export default function AgentDetail() {
       });
       setAgent({ ...agent, status: newStatus });
     } catch (e: any) {
-      alert(`Status toggle error: ${e.message}`);
+      toast.error(`Status toggle error: ${e.message}`);
     }
   }
 
   async function handleActivateVersion(versionId: string) {
     try {
       await api(`/api/v1/agents/${id}/versions/${versionId}/activate`, { method: "POST" });
-      alert("Version successfully activated as PRODUCTION!");
+      toast.success("Version successfully activated as production.");
       await loadData();
     } catch (e: any) {
-      alert(`Activation error: ${e.message}`);
+      toast.error(`Activation error: ${e.message}`);
     }
   }
 
@@ -271,28 +280,32 @@ export default function AgentDetail() {
       });
 
       setShowPromptModal(false);
-      alert("AI Agent updated! Gemini AI generated fresh plan & extraction schema.");
+      toast.success("Agent updated — Gemini generated a fresh plan & extraction schema.");
       await loadData();
     } catch (e: any) {
-      alert(`Prompt update error: ${e.message}`);
+      toast.error(`Prompt update error: ${e.message}`);
     } finally {
       setSaving(false);
     }
   }
 
-  async function handleDeleteVersion() {
+  function handleDeleteVersion() {
     if (!activeVersionObj) return;
     if (agent?.versions?.length <= 1) {
-      alert("Cannot delete the only version of this scraper agent.");
+      toast.error("Cannot delete the only version of this agent.");
       return;
     }
-    if (!confirm(`Are you sure you want to delete version "${activeVersionObj.label}"?`)) return;
+    setShowDeleteVersionConfirm(true);
+  }
+
+  async function doDeleteVersion() {
+    if (!activeVersionObj) return;
     try {
       await api(`/api/v1/agents/${id}/versions/${activeVersionObj.id}`, { method: "DELETE" });
-      alert(`Version ${activeVersionObj.label} deleted!`);
+      toast.success(`Version ${activeVersionObj.label} deleted.`);
       await loadData();
     } catch (e: any) {
-      alert(`Delete version error: ${e.message}`);
+      toast.error(`Delete version error: ${e.message}`);
     }
   }
 
@@ -692,6 +705,37 @@ export default function AgentDetail() {
         onClose={() => setShowScheduleModal(false)}
         wsId={agent?.workspaceId}
         agent={agent}
+      />
+
+      <ConfirmDialog
+        open={showDeleteConfirm}
+        title={`Delete agent "${agent?.name}"`}
+        description="This permanently deletes the agent, all of its versions, and its entire run history."
+        impact={[
+          "All agent versions will be deleted",
+          "All run history will be deleted",
+          "Any schedules for this agent will be deleted",
+          "This cannot be undone",
+        ]}
+        confirmLabel="Delete agent"
+        typedConfirmation={agent?.name}
+        onConfirm={() => {
+          doDeleteAgent();
+          setShowDeleteConfirm(false);
+        }}
+        onCancel={() => setShowDeleteConfirm(false)}
+      />
+
+      <ConfirmDialog
+        open={showDeleteVersionConfirm}
+        title={`Delete version "${activeVersionObj?.label}"`}
+        description="This version's workflow will be permanently removed. Runs that used it keep their history but lose the version reference."
+        confirmLabel="Delete version"
+        onConfirm={() => {
+          doDeleteVersion();
+          setShowDeleteVersionConfirm(false);
+        }}
+        onCancel={() => setShowDeleteVersionConfirm(false)}
       />
     </div>
   );
