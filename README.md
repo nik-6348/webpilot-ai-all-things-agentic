@@ -13,6 +13,32 @@ Running now on Google Cloud (Cloud Run + Cloud SQL + Vertex AI + Cloud Tasks + P
 
 Sign in with Google to try it. The worker and notifier are intentionally private (Cloud Tasks/Pub/Sub only, no public ingress).
 
+## Product walkthrough
+
+**1. Executive dashboard** — real-time success rate, fast-path vs. live-agent run counts, and the actual latency speedup between them.
+
+![Dashboard](demo/01-dashboard.png)
+
+**2. Agent configuration & immutable version history** — every learned or healed workflow is a new, numbered version; the extraction schema is editable per field.
+
+![Agent versions](demo/02-agent-versions.png)
+
+**3. Scheduling a recurring run** — creates a real Cloud Scheduler cron job, not just a database row.
+
+![Schedule trigger](demo/03-schedule-trigger.png)
+
+**4. Active schedules** — every recurring job, its cadence, and its target agent in one place.
+
+![Schedules list](demo/04-schedules-list.png)
+
+**5. Run inspector** — the extraction schema, the extracted records, and step-by-step evidence for a completed discovery run.
+
+![Run inspector](demo/05-run-inspector.png)
+
+**6. Enterprise audit trail** — a tamper-evident record of every version promotion, approval, and run lifecycle event.
+
+![Audit trail](demo/06-audit-trail.png)
+
 ## Why this is different
 
 Most "AI browser agents" reason on every single run — slow, expensive, and one bad model response away from clicking the wrong thing. WebPilot only reasons **once**:
