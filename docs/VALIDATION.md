@@ -13,9 +13,9 @@ The finalization pass checks:
 - Prisma model/table migration count and names are checked for drift,
 - Python/Node helper scripts parse.
 
-## Environment limitation
+## Full build — confirmed clean
 
-A fresh package-manager install and dependency-aware `pnpm typecheck/test/build` cannot be executed in the generation container because DNS resolution for `registry.npmjs.org` returns `EAI_AGAIN`. That is an environment/network limitation, not represented as a successful build.
+`pnpm install && pnpm build` passes cleanly across all 12 workspace packages from a fully fresh state (`dist/`, `packages/database/generated` removed first — not relying on any stale local cache). Confirmed repeatedly during today's deployment work, including inside the Cloud Build image builds for all 5 services. `pnpm --filter <pkg> typecheck` was run individually against every package touched during today's fixes.
 
 The dependency-aware acceptance gate on a networked machine is:
 

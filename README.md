@@ -4,6 +4,16 @@
 
 WebPilot converts a natural-language web task into an approval-ready typed workflow, learns the workflow against a live browser with Gemini 3.7 Flash through Google ADK, stores an immutable `WorkflowSpec`, and executes healthy repeat runs with Playwright **without Gemini reasoning calls**. If the site changes, WebPilot captures the failure context, invokes a bounded Recovery Agent, independently verifies the patch, creates a new immutable version, and resumes the run.
 
+## Live deployment
+
+Running now on Google Cloud (Cloud Run + Cloud SQL + Vertex AI + Cloud Tasks + Pub/Sub + Secret Manager):
+
+- **App:** https://webpilot-web-536937000866.us-central1.run.app
+- **API + Swagger:** https://webpilot-api-536937000866.us-central1.run.app/docs
+- **Demo portal (DOM-drift trigger):** https://webpilot-demo-536937000866.us-central1.run.app
+
+Sign in with Google to try it. The worker and notifier are intentionally private (Cloud Tasks/Pub/Sub only, no public ingress).
+
 ## What is implemented
 
 - Separate deployables: Next.js web, NestJS/Fastify control API, Fastify/Playwright browser worker, notification worker, reproducible demo portal.
@@ -101,7 +111,20 @@ In Cloud Run, services use dedicated service accounts and IAM rather than model 
 
 ## Google Cloud deployment
 
-See [`docs/runbooks/DEPLOY_GCP.md`](docs/runbooks/DEPLOY_GCP.md).
+Two scripts drive the actual deployment used for the live instance above:
+
+```bash
+# One-time: provisions Cloud SQL, service accounts + IAM, Secret Manager,
+# Cloud Tasks queue, Pub/Sub topic, Artifact Registry. Idempotent.
+bash scripts/gcp-provision.sh
+
+# Builds all 5 images, runs the Prisma migration as a Cloud Run Job, and
+# deploys worker/api/notifier/demo/web with production env vars
+# (MOCK_AI=false, no LOCAL_* bypass flags). Safe to re-run for redeploys.
+bash scripts/deploy.sh
+```
+
+See [`docs/runbooks/DEPLOY_GCP.md`](docs/runbooks/DEPLOY_GCP.md) for the Terraform-based path this was originally designed around; the scripts above are the equivalent imperative path actually used to bring up the deployment linked above.
 
 The production topology is:
 
@@ -154,7 +177,7 @@ Use [`scripts/configure-integrations.sh`](scripts/configure-integrations.sh) aft
 
 ## Validation status
 
-See [`docs/VALIDATION.md`](docs/VALIDATION.md). Source/preflight validation is performed in the generated repository. A fresh package install/full TypeScript build could not be executed in the artifact-generation container because DNS resolution to `registry.npmjs.org` returned `EAI_AGAIN`; Cloud Build and local commands are included as the dependency-aware verification gate.
+Live-verified on the deployment linked above, not just built: a real discovery run (Gemini plans + navigates + extracts against a real target site), a fast-path replay of the same agent with `modelCallCount: 0`, and the self-healing loop against the demo portal's V1→V2 DOM drift (failure detected → recovery patch → sandbox replay → independent verifier → new version promoted → run resumes) were all exercised end-to-end against the live Cloud Run deployment. `pnpm install && pnpm build` passes clean from a fully fresh state (all `dist/`/generated output removed first) — see [`docs/VALIDATION.md`](docs/VALIDATION.md) for the full local build/lint/typecheck gate.
 
 ## Hackathon demo
 
