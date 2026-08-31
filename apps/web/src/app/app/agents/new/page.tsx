@@ -5,9 +5,11 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { ArrowLeft, Sparkles, Bot, Globe, Shield, FileText, Lock, Play, Zap, Plus, X, CheckCircle2 } from "lucide-react";
 import { api, workspace } from "../../../../lib/api";
+import { useToast } from "../../../../components/Toast";
 
 export default function NewAgent() {
   const router = useRouter();
+  const toast = useToast();
   const [loading, setLoading] = useState(false);
   const [mode, setMode] = useState<"single" | "advanced">("single");
   const [connections, setConnections] = useState<any[]>([]);
@@ -170,7 +172,7 @@ export default function NewAgent() {
       setNewConnUser("");
       setNewConnPass("");
     } catch (err: any) {
-      alert(err.message || "Failed to save encrypted credentials");
+      toast.error(err.message || "Failed to save encrypted credentials");
     } finally {
       setConnLoading(false);
     }

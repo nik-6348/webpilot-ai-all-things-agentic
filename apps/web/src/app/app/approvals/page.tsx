@@ -3,8 +3,10 @@
 import React, { useEffect, useState } from "react";
 import { CheckSquare, CheckCircle2, XCircle, UserPlus, Building, Mail, Sparkles } from "lucide-react";
 import { api, workspace } from "../../../lib/api";
+import { useToast } from "../../../components/Toast";
 
 export default function Approvals() {
+  const toast = useToast();
   const [approvals, setApprovals] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -31,7 +33,7 @@ export default function Approvals() {
       await api(`/api/v1/approvals/${id}/${verb}`, { method: "POST" });
       await loadApprovals();
     } catch (e: any) {
-      alert(e.message || `Failed to ${verb} approval`);
+      toast.error(e.message || `Failed to ${verb} approval`);
     }
   }
 

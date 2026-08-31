@@ -20,6 +20,8 @@ import {
 } from "lucide-react";
 import { api, workspace } from "../../../lib/api";
 import { cleanAgentTitle } from "../../../components/ScheduleModal";
+import { useToast } from "../../../components/Toast";
+import { ConfirmDialog } from "../../../components/ConfirmDialog";
 
 function formatDurationHuman(run: any) {
   let sec = run.durationSec || run.result?.totalDurationSec;
@@ -43,10 +45,12 @@ function formatDurationHuman(run: any) {
 }
 
 export default function Runs() {
+  const toast = useToast();
   const [runs, setRuns] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchFilter, setSearchFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("ALL");
+  const [deleteTarget, setDeleteTarget] = useState<any>(null);
 
   useEffect(() => {
     async function loadRuns() {
@@ -65,13 +69,17 @@ export default function Runs() {
     loadRuns();
   }, []);
 
-  async function handleDeleteRun(runId: string) {
-    if (!confirm("Are you sure you want to delete this run record?")) return;
+  async function confirmDeleteRun() {
+    if (!deleteTarget) return;
+    const runId = deleteTarget.id;
     try {
       await api(`/api/v1/runs/${runId}`, { method: "DELETE" });
       setRuns(runs.filter((r) => r.id !== runId));
+      toast.success("Run record deleted");
     } catch (e: any) {
-      alert(`Delete run error: ${e.message}`);
+      toast.error(`Delete run error: ${e.message}`);
+    } finally {
+      setDeleteTarget(null);
     }
   }
 
@@ -282,7 +290,7 @@ export default function Runs() {
                           </Link>
 
                           <button
-                            onClick={() => handleDeleteRun(r.id)}
+                            onClick={() => setDeleteTarget(r)}
                             className="p-1.5 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 transition-colors cursor-pointer"
                             title="Delete Run Record"
                           >
@@ -298,6 +306,15 @@ export default function Runs() {
           </div>
         )}
       </div>
+
+      <ConfirmDialog
+        open={!!deleteTarget}
+        title="Delete run record?"
+        description={`This permanently removes the record, steps, and events for run ${deleteTarget?.id}. The extracted data and any GCS artifacts are not recoverable afterward.`}
+        confirmLabel="Delete"
+        onConfirm={confirmDeleteRun}
+        onCancel={() => setDeleteTarget(null)}
+      />
     </div>
   );
 }

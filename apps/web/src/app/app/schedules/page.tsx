@@ -5,6 +5,8 @@ import Link from "next/link";
 import { CalendarClock, Plus, Play, Trash2, Edit3, Power, Calendar, Zap, Target, Sparkles } from "lucide-react";
 import { api, workspace } from "../../../lib/api";
 import { ScheduleModal, cleanAgentTitle } from "../../../components/ScheduleModal";
+import { useToast } from "../../../components/Toast";
+import { ConfirmDialog } from "../../../components/ConfirmDialog";
 
 function parseCronDetails(cron: string): { mode: string; summary: string; days: number[]; timeStr: string | null } {
   if (!cron) return { mode: "RECURRING", summary: "Daily at 09:00 UTC", days: [1, 2, 3, 4, 5], timeStr: "09:00" };
@@ -59,12 +61,14 @@ function parseCronDetails(cron: string): { mode: string; summary: string; days: 
 }
 
 export default function Schedules() {
+  const toast = useToast();
   const [schedules, setSchedules] = useState<any[]>([]);
   const [agents, setAgents] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [activeScheduleForModal, setActiveScheduleForModal] = useState<any>(null);
   const [wsId, setWsId] = useState("");
+  const [deleteTarget, setDeleteTarget] = useState<any>(null);
 
   async function loadSchedules() {
     try {
@@ -98,26 +102,30 @@ export default function Schedules() {
       });
       setSchedules(schedules.map((s) => (s.id === sc.id ? { ...s, enabled: newEnabled } : s)));
     } catch (err: any) {
-      alert(`Toggle status error: ${err.message}`);
+      toast.error(`Toggle status error: ${err.message}`);
     }
   }
 
   async function handleTriggerManual(scId: string) {
     try {
       await api(`/api/v1/schedules/${scId}/trigger-manual`, { method: "POST" });
-      alert("Cron schedule manually triggered! Check Execution Runs Inspector.");
+      toast.success("Cron schedule manually triggered! Check Execution Runs Inspector.");
     } catch (err: any) {
-      alert(`Trigger error: ${err.message}`);
+      toast.error(`Trigger error: ${err.message}`);
     }
   }
 
-  async function handleDeleteSchedule(scId: string) {
-    if (!confirm("Are you sure you want to delete this schedule?")) return;
+  async function confirmDeleteSchedule() {
+    if (!deleteTarget) return;
+    const scId = deleteTarget.id;
     try {
       await api(`/api/v1/schedules/${scId}`, { method: "DELETE" });
       setSchedules(schedules.filter((s) => s.id !== scId));
+      toast.success("Schedule deleted");
     } catch (err: any) {
-      alert(`Delete schedule error: ${err.message}`);
+      toast.error(`Delete schedule error: ${err.message}`);
+    } finally {
+      setDeleteTarget(null);
     }
   }
 
@@ -291,7 +299,7 @@ export default function Schedules() {
                     </button>
 
                     <button
-                      onClick={() => handleDeleteSchedule(sc.id)}
+                      onClick={() => setDeleteTarget(sc)}
                       className="p-1.5 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 transition-colors cursor-pointer"
                       title="Delete Schedule"
                     >
@@ -316,6 +324,15 @@ export default function Schedules() {
         agents={agents}
         existingSchedule={activeScheduleForModal}
         onSuccess={loadSchedules}
+      />
+
+      <ConfirmDialog
+        open={!!deleteTarget}
+        title="Delete schedule?"
+        description={`This stops "${deleteTarget?.name || "this schedule"}" from running and removes it permanently. The underlying Cloud Scheduler job is deleted too — this cannot be undone.`}
+        confirmLabel="Delete"
+        onConfirm={confirmDeleteSchedule}
+        onCancel={() => setDeleteTarget(null)}
       />
     </div>
   );

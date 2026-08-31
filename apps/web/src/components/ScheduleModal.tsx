@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from "react";
 import { CalendarClock, X, Sparkles, Calendar, Zap, Target } from "lucide-react";
 import { api } from "../lib/api";
+import { useToast } from "./Toast";
 
 interface ScheduleModalProps {
   isOpen: boolean;
@@ -34,6 +35,7 @@ export function ScheduleModal({
   existingSchedule,
   onSuccess,
 }: ScheduleModalProps) {
+  const toast = useToast();
   const [selectedAgentId, setSelectedAgentId] = useState("");
   const [scheduleName, setScheduleName] = useState("");
   const [scheduleType, setScheduleType] = useState<"RECURRING" | "HOURLY" | "ONE_TIME">("RECURRING");
@@ -164,7 +166,7 @@ export function ScheduleModal({
       if (onSuccess) onSuccess();
       onClose();
     } catch (err: any) {
-      alert(`Schedule save error: ${err.message}`);
+      toast.error(`Schedule save error: ${err.message}`);
     } finally {
       setSaving(false);
     }

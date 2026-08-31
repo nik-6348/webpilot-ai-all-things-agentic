@@ -28,8 +28,10 @@ import {
 } from "lucide-react";
 import { api } from "../../../../lib/api";
 import { cleanAgentTitle } from "../../../../components/ScheduleModal";
+import { useToast } from "../../../../components/Toast";
 
 export default function RunInspector() {
+  const toast = useToast();
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
   const [run, setRun] = useState<any>(null);
@@ -74,11 +76,11 @@ export default function RunInspector() {
       if (res?.id) {
         window.location.href = `/app/runs/${res.id}`;
       } else {
-        alert("Rerun triggered successfully!");
+        toast.success("Rerun triggered successfully!");
         setRerunMode(null);
       }
     } catch (err: any) {
-      alert(err.message || "Failed to trigger rerun");
+      toast.error(err.message || "Failed to trigger rerun");
       setRerunMode(null);
     }
   };

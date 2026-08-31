@@ -14,8 +14,10 @@ import {
   Clock
 } from "lucide-react";
 import { api, workspace } from "../../lib/api";
+import { useToast } from "../../components/Toast";
 
 export default function Dashboard() {
+  const toast = useToast();
   const [analytics, setAnalytics] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [quickPrompt, setQuickPrompt] = useState("");
@@ -68,7 +70,7 @@ export default function Dashboard() {
         window.location.href = "/app/agents";
       }
     } catch (err: any) {
-      alert(err.message || "Failed to launch quick run");
+      toast.error(err.message || "Failed to launch quick run");
       setLaunching(false);
     }
   };

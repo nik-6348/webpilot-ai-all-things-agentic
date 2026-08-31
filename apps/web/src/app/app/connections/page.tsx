@@ -3,10 +3,14 @@
 import React, { useEffect, useState } from "react";
 import { Zap, ShieldCheck, Key, Plus, Lock, X, CheckCircle2, Edit2, Trash2, Sparkles } from "lucide-react";
 import { api, workspace } from "../../../lib/api";
+import { useToast } from "../../../components/Toast";
+import { ConfirmDialog } from "../../../components/ConfirmDialog";
 
 export default function Connections() {
+  const toast = useToast();
   const [connections, setConnections] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [deleteTarget, setDeleteTarget] = useState<any>(null);
 
   // Modal State
   const [showModal, setShowModal] = useState(false);
@@ -94,19 +98,22 @@ export default function Connections() {
       await loadConnections();
       setShowModal(false);
     } catch (err: any) {
-      alert(err.message || "Failed to save encrypted credentials");
+      toast.error(err.message || "Failed to save encrypted credentials");
     } finally {
       setSubmitting(false);
     }
   }
 
-  async function handleDelete(id: string) {
-    if (!confirm("Are you sure you want to delete these encrypted site credentials?")) return;
+  async function confirmDelete() {
+    if (!deleteTarget) return;
     try {
-      await api(`/api/v1/connections/${id}`, { method: "DELETE" });
+      await api(`/api/v1/connections/${deleteTarget.id}`, { method: "DELETE" });
       await loadConnections();
+      toast.success("Connection deleted");
     } catch (err: any) {
-      alert(err.message || "Failed to delete connection");
+      toast.error(err.message || "Failed to delete connection");
+    } finally {
+      setDeleteTarget(null);
     }
   }
 
@@ -183,7 +190,7 @@ export default function Connections() {
                   </button>
 
                   <button
-                    onClick={() => handleDelete(c.id)}
+                    onClick={() => setDeleteTarget(c)}
                     className="p-1.5 rounded-lg bg-slate-800 hover:bg-rose-900/40 text-slate-400 hover:text-rose-400 transition-colors"
                     title="Delete Credentials"
                   >
@@ -195,6 +202,15 @@ export default function Connections() {
           ))}
         </div>
       )}
+
+      <ConfirmDialog
+        open={!!deleteTarget}
+        title="Delete connection?"
+        description={`This permanently deletes the encrypted credentials for "${deleteTarget?.name}". Any agent still referencing this connection will fail to authenticate on its next run.`}
+        confirmLabel="Delete"
+        onConfirm={confirmDelete}
+        onCancel={() => setDeleteTarget(null)}
+      />
 
       {/* 🔐 MODAL: CREATE / EDIT ENCRYPTED CREDENTIALS */}
       {showModal && (
