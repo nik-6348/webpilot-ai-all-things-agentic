@@ -5,11 +5,15 @@ import {
   WorkflowSpecSchema,
   type WorkflowSpec,
   type WorkflowStep,
+  type BrowserDecision,
+  type WorkflowPatch,
+  type Verification,
 } from "@webpilot/contracts";
 import {
-  navigateDiscovery,
-  recoverWorkflow,
-  verifyRecovery,
+  releaseAgentSession,
+  createWebPilotOrchestrator,
+  newOrchestrationContext,
+  type MultiAgentOrchestrator,
 } from "@webpilot/agents";
 import {
   applyPatch,
@@ -231,6 +235,22 @@ export async function executeRun(runId: string) {
     await assertSafeUrl(agent.targetUrl, allowed);
     console.log(`[WORKER EXECUTE_RUN] assertSafeUrl passed for agent targetUrl`);
     const credentials = await loadCredentials(agent);
+
+    // Real registry-dispatched orchestration: every Planner/Navigator/
+    // Recovery/Verifier call for this run goes through the same
+    // MultiAgentOrchestrator registry (previously built but never
+    // instantiated anywhere), and its lifecycle events feed straight into
+    // the run's event timeline for genuine observability.
+    const orchestrator = createWebPilotOrchestrator();
+    const unsubscribeOrchestrator = orchestrator.subscribe((evt, data) => {
+      if (data.runId !== runId) return;
+      if (evt === "agent_invoked" || evt === "step_executed" || evt === "error") {
+        event(runId, `AGENT_${evt.toUpperCase()}`, data.message || evt, {
+          agentRole: data.agentRole,
+        }).catch(() => {});
+      }
+    });
+
     // If a recovery approval was granted, promote its referenced draft before resuming.
     const approvedRecovery = await prisma.approval.findFirst({
       where: { runId, type: "RECOVERY", status: "APPROVED" },
@@ -259,19 +279,32 @@ export async function executeRun(runId: string) {
         });
       }
     }
-    if (run.executionMode === "DISCOVERY" || !agent.activeVersionId)
-      return await discover(runId, run, credentials, allowed);
-    const version = await prisma.agentVersion.findUniqueOrThrow({
-      where: { id: run.versionId || agent.activeVersionId! },
-    });
-    return await fast(
-      runId,
-      run,
-      WorkflowSpecSchema.parse(version.workflowSpec),
-      credentials,
-      allowed,
-      version,
-    );
+    try {
+      if (run.executionMode === "DISCOVERY" || !agent.activeVersionId)
+        try {
+          return await discover(runId, run, credentials, allowed, orchestrator);
+        } finally {
+          // The Navigator's ADK session is kept alive only for the duration
+          // of one discovery run's step loop — release it however the loop
+          // exits (done, paused, error) so a long-lived worker process
+          // doesn't accumulate one session per run forever.
+          releaseAgentSession(`navigator:${runId}`);
+        }
+      const version = await prisma.agentVersion.findUniqueOrThrow({
+        where: { id: run.versionId || agent.activeVersionId! },
+      });
+      return await fast(
+        runId,
+        run,
+        WorkflowSpecSchema.parse(version.workflowSpec),
+        credentials,
+        allowed,
+        version,
+        orchestrator,
+      );
+    } finally {
+      unsubscribeOrchestrator();
+    }
   } catch (e: any) {
     await prisma.run.update({
       where: { id: runId },
@@ -306,7 +339,14 @@ async function discover(
   run: any,
   credentials: Record<string, string>,
   allowed: string[],
+  orchestrator: MultiAgentOrchestrator,
 ) {
+  const orchestrationContext = newOrchestrationContext(
+    runId,
+    run.agent.goal,
+    run.agent.targetUrl,
+    allowed,
+  );
   await prisma.run.update({
     where: { id: runId },
     data: { status: "RUNNING_DISCOVERY", executionMode: "DISCOVERY" },
@@ -347,13 +387,14 @@ async function discover(
       const shot = rawShot.toString("base64");
 
       const decision = await modelCall(runId, "NAVIGATOR", () =>
-        navigateDiscovery({
+        orchestrator.invokeAgent<BrowserDecision>("NAVIGATOR", orchestrationContext, {
           goal: run.agent.goal,
           schema: planned.extractionSchema,
           url: page.url(),
           dom,
           history: learned,
           screenshotBase64: shot,
+          runId,
         }),
       );
 
@@ -389,7 +430,7 @@ async function discover(
         console.warn(`[STEP EXECUTION FAILED] ${stepErr.message}. Attempting AI Self-Healing...`);
         try {
           const patch = await modelCall(runId, "RECOVERY", () =>
-            recoverWorkflow({
+            orchestrator.invokeAgent<WorkflowPatch>("RECOVERY", orchestrationContext, {
               goal: run.agent.goal,
               workflow: planned,
               failedStep: step,
@@ -556,6 +597,7 @@ async function fast(
   credentials: Record<string, string>,
   allowed: string[],
   version: any,
+  orchestrator: MultiAgentOrchestrator,
 ) {
   await prisma.run.update({
     where: { id: runId },
@@ -611,6 +653,7 @@ async function fast(
           allowed,
           version,
           extracted,
+          orchestrator,
         );
       }
     }
@@ -631,7 +674,14 @@ async function recover(
   allowed: string[],
   version: any,
   previous: any[],
+  orchestrator: MultiAgentOrchestrator,
 ) {
+  const orchestrationContext = newOrchestrationContext(
+    runId,
+    run.agent.goal,
+    run.agent.targetUrl,
+    allowed,
+  );
   const settings = await prisma.workspaceSetting.findUnique({
     where: { workspaceId: run.workspaceId },
   });
@@ -656,7 +706,7 @@ async function recover(
       "image/jpeg",
     );
     const patch = await modelCall(runId, "RECOVERY", () =>
-      recoverWorkflow({
+      orchestrator.invokeAgent<WorkflowPatch>("RECOVERY", orchestrationContext, {
         goal: run.agent.goal,
         workflow: spec,
         failedStep: failed,
@@ -674,7 +724,11 @@ async function recover(
       allowed,
     );
     const verdict = await modelCall(runId, "VERIFIER", () =>
-      verifyRecovery({ patch, verification, expectedGoal: run.agent.goal }),
+      orchestrator.invokeAgent<Verification>("VERIFIER", orchestrationContext, {
+        patch,
+        verification,
+        expectedGoal: run.agent.goal,
+      }),
     );
     await prisma.recoveryAttempt.create({
       data: {

@@ -270,4 +270,43 @@ export class MultiAgentOrchestrator {
   public getSession(runId: string): OrchestrationContext | undefined {
     return this.activeSessions.get(runId);
   }
+
+  /**
+   * Dispatch a single registered agent through the orchestrator's registry
+   * with real lifecycle events, without running the full multi-step saga in
+   * `orchestrate()`. The browser-worker execution engine owns its own run
+   * state machine (checkpoints, anti-loop guard, approval gates) and calls
+   * this once per model invocation so every Planner/Navigator/Recovery/
+   * Verifier call is genuinely registry-dispatched and observable instead
+   * of a bare function call.
+   */
+  public async invokeAgent<T = any>(
+    role: AgentRole,
+    context: OrchestrationContext,
+    payload: any,
+  ): Promise<T> {
+    const agent = this.registry.get(role);
+    if (!agent) throw new Error(`No agent registered for role: ${role}`);
+    this.notify("agent_invoked", {
+      runId: context.runId,
+      agentRole: role,
+      message: `Invoking ${role} agent`,
+    });
+    try {
+      const result = await agent.execute(context, payload);
+      this.notify("step_executed", {
+        runId: context.runId,
+        agentRole: role,
+        message: `${role} agent completed`,
+      });
+      return result as T;
+    } catch (err: any) {
+      this.notify("error", {
+        runId: context.runId,
+        agentRole: role,
+        message: err?.message || String(err),
+      });
+      throw err;
+    }
+  }
 }
