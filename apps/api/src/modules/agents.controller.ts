@@ -361,6 +361,38 @@ export class AgentsController {
     return out;
   }
 
+  @Delete(":id/versions/:versionId") async deleteVersion(
+    @Req() req: any,
+    @Param("id") id: string,
+    @Param("versionId") versionId: string,
+  ) {
+    // The frontend has called DELETE /agents/:id/versions/:versionId since
+    // this feature shipped, but no route existed for it — every call 404'd
+    // and the UI's error handler swallowed that and showed a false success
+    // toast. This is the real implementation.
+    const a = await prisma.agent.findUniqueOrThrow({ where: { id } });
+    await requireWorkspace(req.user.id, a.workspaceId, [
+      "OWNER",
+      "ADMIN",
+      "OPERATOR",
+    ]);
+    const v = await prisma.agentVersion.findUniqueOrThrow({
+      where: { id: versionId },
+    });
+    if (v.agentId !== id) throw new Error("Version mismatch: Version does not belong to this agent");
+    const versionCount = await prisma.agentVersion.count({ where: { agentId: id } });
+    if (versionCount <= 1)
+      throw new Error("Cannot delete the only version of this agent");
+    if (a.activeVersionId === versionId)
+      throw new Error("Cannot delete the active production version — activate a different version first");
+    await prisma.$transaction([
+      prisma.run.updateMany({ where: { versionId }, data: { versionId: null } }),
+      prisma.agentVersion.delete({ where: { id: versionId } }),
+    ]);
+    await audit(a.workspaceId, req.user.id, "VERSION_DELETED", "agent_version", versionId);
+    return { ok: true };
+  }
+
   @Delete(":id") async delete(@Req() req: any, @Param("id") id: string) {
     const a = await prisma.agent.findUniqueOrThrow({ where: { id } });
     await requireWorkspace(req.user.id, a.workspaceId, [

@@ -77,6 +77,10 @@ export class SchedulesController {
       where: { id },
       include: { agent: true },
     });
+    // A disabled schedule's Cloud Scheduler job may still fire while the
+    // remove/re-upsert call below is propagating — this is the actual
+    // enforcement point, so it must always be checked here regardless.
+    if (!s.enabled) return { ok: true, skipped: true, reason: "schedule disabled" };
     const run = await prisma.run.create({
       data: {
         workspaceId: s.workspaceId,
@@ -128,7 +132,7 @@ export class SchedulesController {
   ) {
     const s = await prisma.schedule.findUniqueOrThrow({ where: { id } });
     await requireWorkspace(req.user.id, s.workspaceId, ["OWNER", "ADMIN"]);
-    return prisma.schedule.update({
+    const updated = await prisma.schedule.update({
       where: { id },
       data: {
         ...(body.name !== undefined && { name: body.name }),
@@ -138,6 +142,32 @@ export class SchedulesController {
       },
       include: { agent: true },
     });
+
+    // Editing a schedule previously only touched the DB row — the real
+    // Cloud Scheduler job kept firing on its original cron forever, and
+    // disabling never removed it. Re-sync it here so the DB row and the
+    // actual scheduled job never drift apart.
+    const cronOrTzChanged = body.cronExpression !== undefined || body.timezone !== undefined;
+    const enabledChanged = body.enabled !== undefined;
+    if (!updated.enabled && (enabledChanged || cronOrTzChanged) && updated.schedulerJobName) {
+      await new SchedulerService().remove(updated.schedulerJobName);
+    } else if (updated.enabled && (cronOrTzChanged || enabledChanged)) {
+      const api = process.env.API_PUBLIC_URL || "http://localhost:4000";
+      const job = await new SchedulerService().upsert(
+        `webpilot-${updated.id}`,
+        updated.cronExpression,
+        updated.timezone,
+        `${api}/api/v1/schedules/${updated.id}/trigger`,
+      );
+      if (job !== updated.schedulerJobName) {
+        return prisma.schedule.update({
+          where: { id },
+          data: { schedulerJobName: job },
+          include: { agent: true },
+        });
+      }
+    }
+    return updated;
   }
 
   @Delete(":id") async remove(@Req() req: any, @Param("id") id: string) {

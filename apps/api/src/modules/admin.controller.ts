@@ -129,10 +129,17 @@ export class AdminController {
   @Post("purge") async purgeData(
     @Req() req: any,
     @Query("workspaceId") workspaceId: string,
-    @Body() body: { target: "RUNS" | "AGENTS" | "SCHEDULES" | "FACTORY_RESET"; retentionDays?: number },
+    @Body() body: { target: "RUNS" | "FACTORY_RESET"; retentionDays?: number },
   ) {
     const m = await requireWorkspace(req.user.id, workspaceId, ["OWNER"]);
     const target = body?.target || "RUNS";
+    // Only RUNS and FACTORY_RESET are implemented and reachable from the
+    // UI. The type used to also declare AGENTS/SCHEDULES, which fell
+    // through to this same code with no matching branch — a silent no-op
+    // that still returned {ok:true} and wrote an audit log claiming the
+    // purge happened.
+    if (target !== "RUNS" && target !== "FACTORY_RESET")
+      throw new Error(`Unsupported purge target: ${target}`);
     let count = 0;
 
     if (target === "RUNS") {

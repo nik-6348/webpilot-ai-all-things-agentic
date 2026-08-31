@@ -462,7 +462,7 @@ export default function RunInspector() {
                   <Layers className="w-4.5 h-4.5 text-emerald-400" /> Extracted Item Records ({records.length})
                 </h3>
                 <a
-                  href={`/api/v1/runs/${run.id}/export?format=csv`}
+                  href={`/backend/api/v1/runs/${run.id}/export?format=csv`}
                   download
                   className="px-3.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-bold text-sky-400 border border-slate-700 transition-colors flex items-center gap-1.5"
                 >

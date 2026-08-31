@@ -288,7 +288,7 @@ export default function AgentDetail() {
     }
     if (!confirm(`Are you sure you want to delete version "${activeVersionObj.label}"?`)) return;
     try {
-      await api(`/api/v1/agents/${id}/versions/${activeVersionObj.id}`, { method: "DELETE" }).catch(() => {});
+      await api(`/api/v1/agents/${id}/versions/${activeVersionObj.id}`, { method: "DELETE" });
       alert(`Version ${activeVersionObj.label} deleted!`);
       await loadData();
     } catch (e: any) {
