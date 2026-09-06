@@ -10,6 +10,7 @@ Running now on Google Cloud (Cloud Run + Cloud SQL + Vertex AI + Cloud Tasks + P
 
 - **App:** https://webpilot-web.nik6348.in OR https://webpilot-web-536937000866.us-central1.run.app
 - **API + Swagger:** https://webpilot-api.nik6348.in/docs  OR  https://webpilot-api-536937000866.us-central1.run.app/docs
+- **Demo:** https://youtu.be/_9bJr6OtPRs?si=WOjdzRZduP5Zds5n
 
 Sign in with Google to try it. The worker and notifier are intentionally private (Cloud Tasks/Pub/Sub only, no public ingress).
 
